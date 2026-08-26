@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: Manrope, "Avenir Next", "Segoe UI", sans-serif;
+  background: #06101e;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+
+body {
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 61% 33%, rgba(30, 74, 129, .08), transparent 36%),
+    #06101e;
+}
+
+button { font: inherit; }
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+}
+
+.sidebar { box-shadow: 7px 0 30px rgba(1, 7, 14, .15); }
+
+.nav-item { position: relative; transition: color .16s ease, background .16s ease; }
+.nav-item:hover { color: #eef4fb; background: #0a1a2e; }
+.nav-item.active {
+  background: #0d2242;
+  border: 1px solid #173c75;
+  color: #f6f8fc;
+}
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  border-radius: 2px;
+  background: #2176ff;
+}
+.nav-item.active svg { color: #3384ff; }
+
+.main-column {
+  display: grid;
+  grid-template-rows: clamp(70px, 8.3vh, 78px) minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.dashboard-grid {
+  display: grid;
+  grid-template: "map study" minmax(0, 1fr) "calendar calendar" clamp(130px, 17.7vh, 166px) / minmax(0, 1fr) clamp(300px, 20vw, 330px);
+  gap: clamp(10px, 1.7vh, 16px);
+  min-height: 0;
+  overflow: hidden;
+}
+.topic-control { width: min(430px, 40vw); }
+.control:not(.topic-control) { width: 174px; }
+.control button { box-shadow: inset 0 1px rgba(255, 255, 255, .015); }
+.generate-button { margin-bottom: 0; box-shadow: inset 0 1px rgba(255,255,255,.12); }
+
+.map-card, .study-overview, .weekly-calendar {
+  background-color: rgba(9, 21, 36, .96);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .015);
+}
+.map-card { grid-area: map; }
+.study-overview { grid-area: study; min-height: 0; }
+.weekly-calendar { grid-area: calendar; }
+
+.legend span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.legend i { display: block; width: 8px; height: 8px; border-radius: 50%; }
+
+.inactive-routes, .inactive-stations { opacity: .23; }
+.station-label {
+  fill: #e9edf4;
+  font-family: Manrope, "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: #091523;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.station-label.current-label { fill: #f7f9fc; font-size: 18px; font-weight: 600; stroke-width: 5px; }
+.today-label { fill: white; font: 700 10px Manrope, "Segoe UI", sans-serif; letter-spacing: .04em; }
+.metro-station { cursor: default; }
+.metro-station circle { transition: filter .15s ease; }
+.metro-station:hover > circle { filter: brightness(1.18); }
+.map-tools button { height: 100%; display: grid; place-items: center; }
+
+.calendar-strip { border: 0; }
+.calendar-day { border-left: 1px solid #1c2a3c; }
+.calendar-day:first-child { border-left: 0; }
+.calendar-day.current {
+  margin: 3px 0;
+  border: 1px solid #5595ff;
+  border-radius: 8px;
+  background: #1658d2;
+}
+.calendar-day.current .weekday { color: #d9e6ff; }
+.calendar-day.current .date-number { color: #fff; font-weight: 600; }
+.calendar-day .date-number { font-size: clamp(28px, 2.5vw, 42px); }
+.section-label { font-size: 9px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: #8f9caf; }
+.study-bars small { font-size: 8px; }
+
+@media (max-height: 820px) and (min-width: 1001px) {
+  .study-overview section { padding: 13px 16px; }
+  .study-overview .mt-5 { margin-top: 10px; }
+  .study-overview .mt-4 { margin-top: 9px; }
+  .study-overview section:first-child button:last-child { height: 34px; }
+  .study-overview section:first-child .h-12 { width: 40px; height: 40px; }
+  .study-overview section:nth-child(2) svg { width: 34px; height: 34px; }
+  .study-bars { height: 40px; margin-top: 8px; }
+}
+
+@media (max-width: 1280px) {
+  .app-shell { grid-template-columns: 78px minmax(0, 1fr); }
+  .brand-copy, .nav-item span, .user-card > :not(:first-child) { display: none; }
+  .sidebar nav { padding-inline: 10px; }
+  .nav-item { justify-content: center; padding-inline: 0; }
+  .sidebar > div:first-child { justify-content: center; padding-inline: 0; }
+  .sidebar > div:first-child svg { width: 37px; }
+  .sidebar > div:nth-last-child(2) { margin-inline: 10px; padding: 10px; }
+  .sidebar > div:nth-last-child(2) > div { justify-content: center; }
+  .sidebar > div:nth-last-child(2) > div > div { display: none; }
+  .sidebar > div:nth-last-child(2) > div:last-child { display: none; }
+  .user-card { margin-inline: 10px; justify-content: center; }
+  .topic-control { width: min(360px, 34vw); }
+  .control:not(.topic-control) { width: 160px; }
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr) 310px; }
+  .legend { gap: 10px; }
+}
+
+@media (max-width: 1000px) {
+  body { overflow: auto; }
+  .app-shell { height: auto; min-height: 100vh; }
+  .main-column { display: block; overflow: visible; }
+  .top-controls { flex-wrap: wrap; height: auto; padding-block: 14px; }
+  .top-controls > div { margin-left: 0; flex-wrap: wrap; }
+  .topic-control { width: 100%; }
+  .dashboard-grid {
+    grid-template: "map" clamp(440px, 70vw, 680px) "study" auto "calendar" clamp(140px, 20vw, 166px) / 1fr;
+    overflow: visible;
+  }
+  .map-card { height: auto; }
+  .calendar-strip { grid-template-columns: minmax(0, 1fr) 190px; }
+}
+
+@media (max-width: 700px) {
+  .app-shell { grid-template-columns: 60px minmax(0, 1fr); }
+  .main-column { padding-inline: 12px; padding-bottom: 12px; }
+  .top-controls > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+  .control:not(.topic-control) { width: 100%; }
+  .generate-button { grid-column: 1 / -1; justify-content: center; }
+  .dashboard-grid { grid-template-rows: clamp(400px, 82vw, 560px) auto auto; }
+  .calendar-strip { grid-template-columns: 1fr; }
+  .calendar-summary { min-height: 106px; border-left: 0; border-top: 1px solid #263448; }
+  .calendar-day { min-height: 126px; }
+  .calendar-day .date-number { font-size: clamp(22px, 7vw, 36px); }
+  .calendar-day .weekday { font-size: 8px; }
+  .calendar-day > span:last-child { width: 20px; height: 20px; margin-top: 8px; }
+  .map-heading { height: auto; min-height: 78px; align-items: flex-start; flex-direction: column; gap: 8px; padding-block: 10px; }
+  .legend { flex-wrap: wrap; gap: 6px 12px; }
+  .map-card > div { height: calc(100% - 78px); }
+}
