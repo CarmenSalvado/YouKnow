@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   BarChart3,
   CalendarDays,
@@ -14,30 +15,17 @@ import {
   Target,
   WandSparkles,
 } from 'lucide-react'
+import Brand from './Brand'
+import LandingPage from './LandingPage'
 import LearningMap from './LearningMap'
 import { navigation, week } from './mockData'
 
 const navIcons = [Map, CalendarDays, Library, BarChart3, Sparkles, Settings]
 
-function Logo() {
-  return (
-    <div className="flex items-center gap-3 px-5 py-6">
-      <svg width="41" height="40" viewBox="0 0 42 40" aria-hidden="true">
-        <path d="M4 5v29M4 5l17 20M21 25L38 5M38 5v29" fill="none" stroke="#1769ff" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M4 5l17 20L38 5" fill="none" stroke="#9cc4ff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <div className="brand-copy">
-        <strong className="block text-[20px] font-bold tracking-[.08em] text-[#f2f5f9]">METRO</strong>
-        <span className="block text-[10px] tracking-[.12em] text-muted">LEARNING PATH</span>
-      </div>
-    </div>
-  )
-}
-
 function Sidebar() {
   return (
     <aside className="sidebar flex min-h-0 flex-col border-r border-[#213044] bg-[#06111f]">
-      <Logo />
+      <Brand />
       <nav className="mt-5 flex-1 px-3" aria-label="Primary navigation">
         {navigation.map((item, index) => {
           const Icon = navIcons[index]
@@ -51,7 +39,7 @@ function Sidebar() {
         })}
       </nav>
 
-      <div className="mx-4 mb-4 rounded-[10px] border border-[#263548] bg-[#091523] p-4">
+      <div className="streak-card mx-4 mb-4 rounded-[10px] border border-[#263548] bg-[#091523] p-4">
         <div className="flex items-center gap-3">
           <Flame className="text-[#f5f8fc]" size={25} />
           <div>
@@ -109,17 +97,17 @@ function StudyOverview() {
       <section className="border-b border-[#263448] p-5">
         <div className="flex items-center justify-between">
           <p className="section-label text-[#dfe5ed]">Today's lesson</p>
-          <button className="text-[10px] text-[#4d8fff] underline underline-offset-2">View Plan</button>
+          <button className="plan-link text-[10px] text-[#4d8fff] underline underline-offset-2">View Plan</button>
         </div>
         <div className="mt-5 flex items-center gap-3">
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full border border-[#2a70e5] bg-[#1252c8] text-white"><CircleDot size={21} /></div>
+          <div className="lesson-icon grid h-12 w-12 shrink-0 place-items-center rounded-full border border-[#2a70e5] bg-[#1252c8] text-white"><CircleDot size={21} /></div>
           <div>
             <p className="text-[13px] font-semibold text-[#f3f6fa]">Quantum Algorithms</p>
             <p className="mt-1 text-[11px] text-muted">Entanglement &amp; Superposition</p>
             <p className="mt-1 text-[11px] text-muted">30 min</p>
           </div>
         </div>
-        <button className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[6px] bg-[#175edc] text-[11px] font-semibold text-white">
+        <button className="lesson-button mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[6px] bg-[#175edc] text-[11px] font-semibold text-white">
           Start Lesson <Play size={13} fill="currentColor" />
         </button>
       </section>
@@ -134,7 +122,7 @@ function StudyOverview() {
             <p className="mt-1 text-[11px] font-semibold text-[#a866e5]">Sep 23, 2025</p>
           </div>
         </div>
-        <div className="mt-5 h-1.5 overflow-hidden rounded-sm bg-[#1b2a3d]"><span className="block h-full w-[68%] bg-[#1f70f4]" /></div>
+        <div className="mt-5 h-1.5 overflow-hidden rounded-sm bg-[#1b2a3d]"><span className="milestone-progress block h-full w-[68%] bg-[#1f70f4]" /></div>
         <p className="mt-2 text-[10px] text-[#9ca7b7]">68% of path completed</p>
       </section>
 
@@ -168,7 +156,7 @@ function WeeklyCalendar() {
             <div key={day.day} aria-current={day.current ? 'date' : undefined} className={`calendar-day flex flex-col items-center justify-center text-center ${day.current ? 'current' : ''}`}>
               <span className="date-number text-[42px] font-medium leading-none text-[#d9dee7]">{day.date}</span>
               <span className="weekday mt-2 text-[11px] font-medium tracking-[.06em] text-[#9ba5b4]">{day.day}</span>
-              <span className={`mt-3 grid h-6 w-6 place-items-center rounded-full border ${statuses[index] === 'done' ? 'border-[#2775e8] bg-[#1461d6] text-white' : statuses[index] === 'current' ? 'border-[#75a6ff] bg-[#e9c40f]' : 'border-[#aeb7c5]'}`}>
+              <span className={`status-dot mt-3 grid h-6 w-6 place-items-center rounded-full border ${statuses[index] === 'done' ? 'border-[#2775e8] bg-[#1461d6] text-white' : statuses[index] === 'current' ? 'border-[#75a6ff] bg-[#e9c40f]' : 'border-[#aeb7c5]'}`}>
                 {statuses[index] === 'done' && <Check size={12} strokeWidth={2.5} />}
               </span>
             </div>
@@ -200,7 +188,7 @@ function WeeklyCalendar() {
   )
 }
 
-export default function App() {
+function Dashboard() {
   return (
     <div className="app-shell min-h-screen bg-ink text-white">
       <Sidebar />
@@ -212,6 +200,21 @@ export default function App() {
           <WeeklyCalendar />
         </div>
       </main>
+    </div>
+  )
+}
+
+export default function App() {
+  const [entered, setEntered] = useState(false)
+  return (
+    <div className="app-view-transition t-page-slide" data-page={entered ? '2' : '1'}>
+      <section className="t-page" data-page-id="1" aria-hidden={entered} ref={element => { element?.toggleAttribute('inert', entered) }}>
+        <LandingPage onEnter={() => setEntered(true)} />
+      </section>
+      <section className="t-page" data-page-id="2" aria-hidden={!entered} ref={element => { element?.toggleAttribute('inert', !entered) }}>
+        <Dashboard />
+      </section>
+      <i className="page-rail" aria-hidden="true" />
     </div>
   )
 }

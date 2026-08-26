@@ -35,7 +35,7 @@ function MetroStation({ station }: { station: Station }) {
   const lines = station.lines ?? [station.label]
 
   return (
-    <g className="metro-station">
+    <g className={`metro-station ${current ? 'current-station' : ''}`}>
       {current && (
         <>
           <circle cx={x} cy={y} r="24" fill="#071423" stroke="#f7fbff" strokeWidth="3" />
@@ -98,8 +98,8 @@ export default function LearningMap() {
             {[['82','385'],['121','340'],['220','306'],['403','353'],['452','535'],['590','535'],['118','64'],['211','100'],['355','146'],['501','182'],['764','102'],['916','186'],['219','66'],['361','162'],['545','265'],['753','334'],['131','502'],['250','535'],['379','566'],['711','538']].map(([cx, cy]) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="5" />)}
           </g>
 
-          <g fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6">
-            {routes.map(({ route, points }, index) => <polyline key={`${route}-${index}`} points={stretchPoints(points)} stroke={colors[route]} />)}
+          <g className="active-routes" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6">
+            {routes.map(({ route, points }, index) => <polyline key={`${route}-${index}`} points={stretchPoints(points)} stroke={colors[route]} pathLength="1" />)}
           </g>
           {stations.map(station => <MetroStation key={station.label} station={station} />)}
         </svg>
