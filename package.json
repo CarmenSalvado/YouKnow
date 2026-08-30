@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
+    "check:ui": "node scripts/check-ui.mjs",
+    "check:e2e": "node scripts/e2e-check.mjs",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

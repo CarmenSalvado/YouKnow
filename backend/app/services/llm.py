@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any, Protocol, TypeVar
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from openai import APIError, AsyncOpenAI
 from pydantic import BaseModel, ValidationError
@@ -68,3 +72,44 @@ class OpenAILLMClient:
                 raise LLMClientError(f"LLM request failed: {type(error).__name__}") from error
         raise LLMClientError(f"LLM structured output remained invalid after one retry: {last_error}")
 
+
+class OllamaLLMClient:
+    def __init__(self, *, model: str, base_url: str = "http://127.0.0.1:11434") -> None:
+        self.model = model
+        self.url = f"{base_url.rstrip('/')}/api/chat"
+
+    def _post(self, payload: bytes) -> dict[str, Any]:
+        with urlopen(Request(self.url, data=payload, headers={"Content-Type": "application/json"}), timeout=120) as response:
+            return json.loads(response.read())
+
+    async def structured_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[StructuredModel],
+    ) -> StructuredModel:
+        prompt = user_prompt
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                payload = json.dumps({
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": False,
+                    "think": False,
+                    "format": response_model.model_json_schema(),
+                    "options": {"temperature": 0, "num_predict": 4096},
+                }).encode()
+                content = (await asyncio.to_thread(self._post, payload))["message"]["content"]
+                return response_model.model_validate_json(content)
+            except (URLError, TimeoutError, OSError) as error:
+                raise LLMClientError(f"Ollama request failed: {type(error).__name__}") from error
+            except (KeyError, TypeError, ValueError, ValidationError) as error:
+                last_error = error
+                if attempt == 0:
+                    prompt = f"{user_prompt}\n\nYour previous response was invalid: {error}. Return only valid JSON matching the schema."
+        raise LLMClientError(f"Ollama structured output remained invalid after one retry: {last_error}")

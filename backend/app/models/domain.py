@@ -24,6 +24,12 @@ class ConceptCategory(StrEnum):
     APPLICATION = "application"
 
 
+class GenerationMode(StrEnum):
+    AI = "ai"
+    CURATED = "curated"
+    STRUCTURAL = "structural"
+
+
 class SourceInput(BaseModel):
     type: SourceType
     value: str = Field(min_length=1)
@@ -73,7 +79,7 @@ class Dependency(BaseModel):
 
 class SourceAnalysis(BaseModel):
     title: str = Field(min_length=1)
-    concepts: list[AnalyzedConcept] = Field(min_length=10, max_length=25)
+    concepts: list[AnalyzedConcept] = Field(min_length=4, max_length=25)
     dependencies: list[Dependency]
 
 
@@ -135,6 +141,7 @@ class PlanStatistics(BaseModel):
 class PlanResponse(BaseModel):
     id: str
     title: str
+    generation_mode: GenerationMode
     concepts: list[Concept]
     edges: list[Edge]
     schedule: list[StudySession]

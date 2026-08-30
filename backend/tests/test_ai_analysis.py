@@ -9,7 +9,7 @@ from app.models import (
     RelationshipRepair,
     SourceAnalysis,
 )
-from app.services.llm import OpenAILLMClient
+from app.services.llm import LLMClientError, OpenAILLMClient
 from app.services.plan_service import PlanService
 
 
@@ -130,3 +130,65 @@ def test_openai_client_retries_invalid_structured_output_once() -> None:
     assert result == valid
     assert responses.calls == 2
 
+
+def test_arbitrary_topic_generates_custom_local_plan_without_llm() -> None:
+    plan = asyncio.run(
+        PlanService(settings()).generate(
+            GeneratePlanRequest.model_validate(
+                {
+                    "source": {"type": "topic", "value": "Urban Beekeeping"},
+                    "preferences": {"minutes_per_day": 45, "start_date": "2026-08-27"},
+                }
+            )
+        )
+    )
+
+    assert plan.title == "Urban Beekeeping"
+    assert len(plan.concepts) == 12
+    assert all("Urban Beekeeping" in concept.name for concept in plan.concepts)
+    assert plan.concepts[-1].id == "capstone"
+    assert plan.statistics.total_sessions == len(plan.schedule)
+
+
+def test_llm_failure_falls_back_to_local_plan() -> None:
+    class FailingLLM:
+        async def structured_completion(self, **kwargs):
+            raise LLMClientError("offline")
+
+    plan = asyncio.run(
+        PlanService(settings(), FailingLLM()).generate(
+            GeneratePlanRequest.model_validate(
+                {
+                    "source": {"type": "text", "value": "Mycology notes\nFungi, spores, hyphae, and ecosystems."},
+                    "preferences": {"start_date": "2026-08-27"},
+                }
+            )
+        )
+    )
+
+    assert plan.title == "Mycology notes"
+    assert len(plan.concepts) == 12
+    assert plan.concepts[0].name == "Mycology notes: Orientation"
+
+
+def test_narrow_topic_keeps_only_the_stations_returned_by_analysis() -> None:
+    analysis = quantum_analysis().model_copy(
+        update={
+            "title": "Binary Search",
+            "concepts": quantum_analysis().concepts[:4],
+            "dependencies": [],
+        }
+    )
+    plan = asyncio.run(
+        PlanService(settings(), FakeLLMClient(analysis)).generate(
+            GeneratePlanRequest.model_validate(
+                {
+                    "source": {"type": "topic", "value": "Binary Search"},
+                    "preferences": {"start_date": "2026-08-27"},
+                }
+            )
+        )
+    )
+
+    assert plan.title == "Binary Search"
+    assert len(plan.concepts) == 4
