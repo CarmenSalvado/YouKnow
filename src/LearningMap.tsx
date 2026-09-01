@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Crosshair, Maximize2, Minimize2, Minus, Plus } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { Check, Clock3, Crosshair, GitBranch, Maximize2, Minimize2, Minus, Play, Plus, WandSparkles, X } from 'lucide-react'
 import { stations, type RouteName, type Station } from './mockData'
 
 const colors: Record<RouteName, string> = {
@@ -9,9 +9,30 @@ const colors: Record<RouteName, string> = {
   orange: '#f0a512',
 }
 
-type LearningConcept = { id: string; name: string; description: string; category: 'foundation' | 'core' | 'advanced' | 'application'; level: number }
+type LearningConcept = { id: string; name: string; description: string; estimated_minutes: number; category: 'foundation' | 'core' | 'advanced' | 'application'; level: number }
 type LearningEdge = { from: string; to: string }
+type LearningLine = { id: string; name: string; description: string; concept_ids: string[] }
 const categoryColors = { foundation: colors.blue, core: colors.green, advanced: colors.purple, application: colors.orange }
+const linePalette = ['#2e80ff', '#48b96a', '#9a5dea', '#f0a512', '#17bebb', '#ff6b6b', '#e6d34e', '#ee75c5']
+const routeCategories = { blue: 'foundation', green: 'core', purple: 'advanced', orange: 'application' } as const
+const categoryLabels = { foundation: 'Foundation', core: 'Core concept', advanced: 'Advanced', application: 'Application' }
+
+function collectPrerequisites(conceptId: string | undefined, edges: LearningEdge[]) {
+  const required = new Set<string>()
+  if (!conceptId) return required
+  const pending = [conceptId]
+  // ponytail: plans are capped at 25 nodes; index incoming edges if that ceiling grows.
+  while (pending.length) {
+    const target = pending.pop()!
+    edges.forEach(edge => {
+      if (edge.to === target && !required.has(edge.from)) {
+        required.add(edge.from)
+        pending.push(edge.from)
+      }
+    })
+  }
+  return required
+}
 
 const mapY = (value: number) => value
 const stretchPoints = (points: string) => points
@@ -32,7 +53,7 @@ const routes: { route: RouteName; points: string }[] = [
   { route: 'orange', points: '608,326 678,347 729,366 765,423 765,454 795,500 795,536 814,560' },
 ]
 
-function MetroStation({ station }: { station: Station }) {
+function MetroStation({ station, selected, onSelect, onStart }: { station: Station; selected: boolean; onSelect: () => void; onStart: () => void }) {
   const { x, route, interchange, current } = station
   const y = mapY(station.y)
   const labelX = station.labelX ?? x + 19
@@ -40,10 +61,26 @@ function MetroStation({ station }: { station: Station }) {
   const lines = station.lines ?? [station.label]
 
   return (
-    <g className={`metro-station ${current ? 'current-station' : ''}`}>
+    <g
+      className={`metro-station interactive-station ${current ? 'current-station' : ''} ${selected ? 'selected-station' : ''}`}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={`${station.label}. Select station; double click to start.`}
+      onClick={onSelect}
+      onDoubleClick={onStart}
+      onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
+    >
+      <circle className="station-hit" cx={x} cy={y} r="25" />
+      {selected && <circle className="station-selection" cx={x} cy={y} r="22" />}
       {current && (
         <>
-          <circle cx={x} cy={y} r="24" fill="#071423" stroke="#f7fbff" strokeWidth="3" />
+          <circle className="station-current" cx={x} cy={y} r="24" fill="#071423" stroke="#f7fbff" strokeWidth="3" />
           <circle cx={x} cy={y} r="20" fill="none" stroke="#2e80ff" strokeWidth="4" />
           <circle cx={x} cy={y} r="10" fill="#f7fbff" />
           <g transform={`translate(${x + 30} ${y - 31})`}>
@@ -66,21 +103,54 @@ function MetroStation({ station }: { station: Station }) {
   )
 }
 
-export default function LearningMap({ title = 'Quantum Computing', concepts, edges = [], currentConceptId, empty = false }: { title?: string; concepts?: LearningConcept[]; edges?: LearningEdge[]; currentConceptId?: string; empty?: boolean }) {
+export default function LearningMap({ title = 'Quantum Computing', concepts, edges = [], lines = [], currentConceptId, completedConceptIds = [], empty = false, canGenerate = false, generating = false, onGenerate, onStartConcept, onExpandConcept }: {
+  title?: string
+  concepts?: LearningConcept[]
+  edges?: LearningEdge[]
+  lines?: LearningLine[]
+  currentConceptId?: string
+  completedConceptIds?: string[]
+  empty?: boolean
+  canGenerate?: boolean
+  generating?: boolean
+  onGenerate?: () => void
+  onStartConcept?: (conceptId: string) => void
+  onExpandConcept?: (conceptId: string, conceptName: string) => void
+}) {
   const card = useRef<HTMLElement>(null)
   const [zoom, setZoom] = useState(1)
   const [fullscreen, setFullscreen] = useState(false)
   const [selectedId, setSelectedId] = useState(currentConceptId)
-  const selected = concepts?.find(concept => concept.id === selectedId)
+  const [pathOnly, setPathOnly] = useState(false)
+  const generated = !!concepts?.length
+  const presetStation = !generated ? stations.find(station => station.label === selectedId) : undefined
+  const selected: LearningConcept | undefined = concepts?.find(concept => concept.id === selectedId) ?? (presetStation ? {
+    id: presetStation.label,
+    name: presetStation.label,
+    description: `Understand ${presetStation.label} and how it connects to the wider Quantum Computing path.`,
+    estimated_minutes: 30,
+    category: routeCategories[presetStation.route],
+    level: 0,
+  } : undefined)
+  const prerequisiteIds = useMemo(() => collectPrerequisites(generated ? selectedId : undefined, edges), [edges, generated, selectedId])
+  const directPrerequisites = concepts?.filter(concept => edges.some(edge => edge.from === concept.id && edge.to === selectedId)) ?? []
+  const unlockedConcepts = concepts?.filter(concept => edges.some(edge => edge.from === selectedId && edge.to === concept.id)) ?? []
+  const completed = useMemo(() => new Set(completedConceptIds), [completedConceptIds])
+  const lineByConcept = useMemo(() => new Map(lines.flatMap((line, index) => line.concept_ids.map(id => [id, { ...line, color: linePalette[index % linePalette.length], index }] as const))), [lines])
+  const stationColor = (concept: LearningConcept) => lineByConcept.get(concept.id)?.color ?? categoryColors[concept.category]
+  const visibleConcepts = pathOnly && selectedId
+    ? concepts?.filter(concept => concept.id === selectedId || prerequisiteIds.has(concept.id))
+    : concepts
+  const visibleIds = useMemo(() => new Set(visibleConcepts?.map(concept => concept.id)), [visibleConcepts])
   const layout = useMemo(() => {
-    if (!concepts?.length) return new Map<string, { x: number; y: number }>()
-    const maxLevel = Math.max(...concepts.map(concept => concept.level), 1)
-    return new Map(concepts.map(concept => {
-      const peers = concepts.filter(item => item.level === concept.level)
+    if (!visibleConcepts?.length) return new Map<string, { x: number; y: number }>()
+    const maxLevel = Math.max(...visibleConcepts.map(concept => concept.level), 1)
+    return new Map(visibleConcepts.map(concept => {
+      const peers = visibleConcepts.filter(item => item.level === concept.level).sort((a, b) => (lineByConcept.get(a.id)?.index ?? 99) - (lineByConcept.get(b.id)?.index ?? 99))
       const index = peers.findIndex(item => item.id === concept.id)
       return [concept.id, { x: 70 + concept.level / maxLevel * 820, y: 55 + (index + 1) * 490 / (peers.length + 1) }]
     }))
-  }, [concepts])
+  }, [lineByConcept, visibleConcepts])
 
   useEffect(() => {
     const syncFullscreen = () => setFullscreen(document.fullscreenElement === card.current)
@@ -88,12 +158,20 @@ export default function LearningMap({ title = 'Quantum Computing', concepts, edg
     return () => document.removeEventListener('fullscreenchange', syncFullscreen)
   }, [])
 
-  useEffect(() => setSelectedId(currentConceptId), [currentConceptId])
+  useEffect(() => {
+    setSelectedId(currentConceptId)
+    setPathOnly(false)
+  }, [concepts, currentConceptId])
 
   const changeZoom = (amount: number) => setZoom(value => Math.min(1.5, Math.max(.75, value + amount)))
   const toggleFullscreen = () => {
     const action = document.fullscreenElement ? document.exitFullscreen() : card.current?.requestFullscreen()
     action?.catch(() => undefined)
+  }
+  const selectConcept = (conceptId: string) => setSelectedId(conceptId)
+  const closeInspector = () => {
+    setSelectedId(undefined)
+    setPathOnly(false)
   }
 
   return (
@@ -104,15 +182,17 @@ export default function LearningMap({ title = 'Quantum Computing', concepts, edg
           <h1 className="mt-0.5 text-[17px] font-semibold text-[#f0f4fa]" title={selected?.description}>{selected?.name ?? title}</h1>
         </div>
         <div className="legend flex items-center gap-5 text-[11px] text-[#a6b0bf]">
-          <span><i className="bg-[#2e80ff]" />Foundations</span>
-          <span><i className="bg-[#48b96a]" />Core concepts</span>
-          <span><i className="bg-[#8d4dd2]" />Advanced topics</span>
-          <span><i className="bg-[#f0a512]" />Applications</span>
+          {generated && lines.length ? lines.map((line, index) => <span key={line.id} title={line.description}><i style={{ background: linePalette[index % linePalette.length] }} />{line.name}</span>) : <>
+            <span><i className="bg-[#2e80ff]" />Foundations</span>
+            <span><i className="bg-[#48b96a]" />Core concepts</span>
+            <span><i className="bg-[#8d4dd2]" />Advanced topics</span>
+            <span><i className="bg-[#f0a512]" />Applications</span>
+          </>}
         </div>
       </header>
 
       <div className="relative h-[calc(100%-56px)] min-h-0">
-        {empty && !concepts?.length && <div className="empty-map"><span>NO SERVICE</span><div className="empty-map-line"><i /><i /><i /><i /></div><h2>Your map starts with one destination.</h2><p>Enter a topic above and Metro will show what to learn, in what order, and how long it will take.</p></div>}
+        {empty && !concepts?.length && <div className="empty-map"><div className="empty-map-line"><i /><i /><i /><i /></div><h2>Your map starts with one destination.</h2><p>Add a topic or source above, then create your personalized learning route.</p><button type="button" onClick={onGenerate} disabled={!canGenerate || generating} className="generate-button mt-5 flex h-10 items-center gap-2 rounded-[7px] bg-[#1759dc] px-5 text-[11px] font-semibold text-white hover:bg-[#1d68f5]"><WandSparkles size={15} />{generating ? 'Creating map…' : canGenerate ? 'Create my map' : 'Add a source to begin'}</button></div>}
         <svg viewBox="0 0 960 600" className="h-full w-full" role="img" aria-labelledby="map-title map-description">
           <title id="map-title">{title} prerequisite learning path</title>
           <desc id="map-description">A metro-style map linking foundations, core concepts, advanced topics, and applications.</desc>
@@ -120,25 +200,57 @@ export default function LearningMap({ title = 'Quantum Computing', concepts, edg
             <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
               <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#26384c" strokeWidth="1" opacity=".32" />
             </pattern>
+            <filter id="station-glow" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="5" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
           </defs>
           <g className="map-viewport" style={{ transform: `scale(${zoom})` }}>
             <rect width="960" height="600" fill="url(#grid)" />
 
-            {concepts?.length ? <>
+            {visibleConcepts?.length ? <>
               <g className="active-routes" fill="none" stroke="#40516a" strokeWidth="3">
                 {edges.map(edge => {
                   const from = layout.get(edge.from)
                   const to = layout.get(edge.to)
-                  return from && to ? <line key={`${edge.from}-${edge.to}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} /> : null
+                  const required = prerequisiteIds.has(edge.from) && (prerequisiteIds.has(edge.to) || edge.to === selectedId)
+                  const fromLine = lineByConcept.get(edge.from)
+                  const edgeColor = fromLine && fromLine.id === lineByConcept.get(edge.to)?.id ? fromLine.color : '#40516a'
+                  return from && to && visibleIds.has(edge.from) && visibleIds.has(edge.to)
+                    ? <line className={`concept-edge ${required ? 'required-edge' : selected ? 'dimmed-edge' : ''}`} style={required ? undefined : { stroke: edgeColor }} key={`${edge.from}-${edge.to}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
+                    : null
                 })}
               </g>
-              {concepts.map(concept => {
+              {visibleConcepts.map(concept => {
                 const point = layout.get(concept.id)!
                 const current = concept.id === currentConceptId
-                return <g key={concept.id} className={`metro-station generated-station ${current ? 'current-station' : ''}`} role="button" tabIndex={0} aria-label={`${concept.name}: ${concept.description}`} onClick={() => setSelectedId(concept.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(concept.id) }}>
-                  {current && <circle cx={point.x} cy={point.y} r="19" fill="none" stroke="#f7fbff" strokeWidth="3" />}
-                  <circle cx={point.x} cy={point.y} r="9" fill="#091523" stroke={categoryColors[concept.category]} strokeWidth="5" />
+                const isSelected = concept.id === selectedId
+                const isRequired = prerequisiteIds.has(concept.id)
+                const related = !selected || isSelected || isRequired || unlockedConcepts.some(item => item.id === concept.id)
+                return <g
+                  key={concept.id}
+                  className={`metro-station generated-station interactive-station ${current ? 'current-station' : ''} ${isSelected ? 'selected-station' : ''} ${isRequired ? 'required-station' : ''} ${completed.has(concept.id) ? 'completed-station' : ''} ${related ? '' : 'dimmed-station'}`}
+                  style={{ '--station-color': stationColor(concept) } as CSSProperties}
+                  data-concept-id={concept.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  aria-label={`${concept.name}: ${concept.description}. Select station; double click to start.`}
+                  onClick={() => selectConcept(concept.id)}
+                  onDoubleClick={() => onStartConcept?.(concept.id)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      selectConcept(concept.id)
+                    }
+                  }}
+                >
+                  <circle className="station-hit" cx={point.x} cy={point.y} r="25" />
+                  {isSelected && <circle className="station-selection" cx={point.x} cy={point.y} r="20" />}
+                  {current && <circle className="station-current" cx={point.x} cy={point.y} r="19" fill="none" />}
+                  <circle cx={point.x} cy={point.y} r="9" fill="#091523" stroke={stationColor(concept)} strokeWidth="5" />
                   <circle cx={point.x} cy={point.y} r="3.5" fill="#e8eef7" />
+                  {completed.has(concept.id) && <path className="station-check" d="M-4 0l3 3 6-7" transform={`translate(${point.x} ${point.y})`} />}
                   <text x={point.x + 15} y={point.y + 4} className="station-label">{concept.name}</text>
                 </g>
               })}
@@ -156,10 +268,29 @@ export default function LearningMap({ title = 'Quantum Computing', concepts, edg
             <g className="active-routes" fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth="6">
               {routes.map(({ route, points }, index) => <polyline key={`${route}-${index}`} points={stretchPoints(points)} stroke={colors[route]} pathLength="1" />)}
             </g>
-            {stations.map(station => <MetroStation key={station.label} station={station} />)}
+            {stations.map(station => <MetroStation key={station.label} station={station} selected={station.label === selectedId} onSelect={() => selectConcept(station.label)} onStart={() => onStartConcept?.(station.label)} />)}
             </> : null}
           </g>
         </svg>
+
+        {selected && <aside className="map-inspector" aria-live="polite">
+          <header>
+            <span style={{ '--station-color': stationColor(selected) } as CSSProperties}><i />{lineByConcept.get(selected.id)?.name ?? categoryLabels[selected.category]}</span>
+            <button type="button" aria-label="Close station details" onClick={closeInspector}><X size={14} /></button>
+          </header>
+          <h2>{selected.name}</h2>
+          <p>{selected.description}</p>
+          {generated ? <div className="map-inspector-stats"><span><strong>{selected.estimated_minutes}</strong> min</span><span><strong>{prerequisiteIds.size}</strong> required</span><span><strong>{unlockedConcepts.length}</strong> unlocks</span></div> : <div className="map-inspector-meta"><span><Clock3 size={13} />{selected.estimated_minutes} min</span><span><i />Ready to start</span></div>}
+          {directPrerequisites.length > 0 && <div className="map-prerequisites">
+            <small>Direct prerequisites</small>
+            <div>{directPrerequisites.map(concept => <button type="button" key={concept.id} onClick={() => selectConcept(concept.id)}><i style={{ background: stationColor(concept) }} />{concept.name}</button>)}</div>
+          </div>}
+          <div className={`map-inspector-actions ${generated ? 'with-path' : ''}`}>
+            {onStartConcept && <button type="button" className="start-node" onClick={() => onStartConcept(selected.id)}>{completed.has(selected.id) ? <Check size={14} /> : <Play size={14} fill="currentColor" />}{completed.has(selected.id) ? 'Review lesson' : 'Start lesson'}</button>}
+            {onExpandConcept && <button type="button" className="extend-line" onClick={() => onExpandConcept(selected.id, selected.name)}><Plus size={14} />Extend the line</button>}
+            {generated && <button type="button" className="focus-path" aria-pressed={pathOnly} onClick={() => setPathOnly(value => !value)}><GitBranch size={14} />{pathOnly ? 'Show full map' : `Required path · ${prerequisiteIds.size + 1}`}</button>}
+          </div>
+        </aside>}
 
         <div className="map-tools absolute bottom-4 left-4 flex h-10 items-center divide-x divide-[#253447] overflow-hidden rounded-lg border border-[#28374a] bg-[#081321]/95 text-[#9aa6b7]">
           <button type="button" aria-label="Reset zoom" onClick={() => setZoom(1)} className="px-3 hover:text-white"><Crosshair size={17} /></button>

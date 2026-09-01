@@ -3,12 +3,12 @@ import { ArrowDown, ArrowRight } from 'lucide-react'
 import Brand from './Brand'
 
 const stops = [
-  { id: 'central', number: '01', short: 'Origin', title: 'Learn anything. Without getting lost.', copy: 'Metro turns a huge topic into a clear route: what to learn, in what order, and how far to move each day.', color: '#3b82f6', position: [520, 110] },
+  { id: 'central', number: '01', short: 'Origin', title: 'Learn anything. Without getting lost.', copy: 'YouKnow turns a huge topic into a clear route: what to learn, in what order, and how far to move each day.', color: '#3b82f6', position: [520, 110] },
   { id: 'entrada', number: '02', short: 'Topic', title: 'Tell us where you want to go.', copy: 'Enter a topic, paste a source, or set a goal. You do not need to prepare a syllabus before you begin.', color: '#f04f3d', position: [330, 110] },
-  { id: 'conexiones', number: '03', short: 'Route', title: 'Start with what you need to know.', copy: 'Metro finds the prerequisites and connects every concept. See the full journey before taking the first step.', color: '#b56cff', position: [220, 220] },
-  { id: 'ritmo', number: '04', short: 'Pace', title: 'A plan that actually fits your day.', copy: 'Your route adapts to your available time, target date, and real pace. Miss a day and it recalculates.', color: '#ffb52e', position: [220, 480] },
+  { id: 'conexiones', number: '03', short: 'Route', title: 'Start with what you need to know.', copy: 'YouKnow finds the prerequisites and connects every concept. See the full journey before taking the first step.', color: '#b56cff', position: [220, 220] },
+  { id: 'ritmo', number: '04', short: 'Pace', title: 'A plan that actually fits your day.', copy: 'Set the time you have each day. Your route calculates when you will master the topic and recalculates as your pace changes.', color: '#ffb52e', position: [220, 480] },
   { id: 'progreso', number: '05', short: 'Progress', title: 'Always know where you are.', copy: 'Move forward one station at a time. The line makes it clear what you have mastered and what comes next.', color: '#29c58a', position: [400, 660] },
-  { id: 'destino', number: '06', short: 'Destination', title: 'Your next line starts today.', copy: 'Choose a topic. Metro handles the order. You only need to reach the next stop.', color: '#ff5b94', position: [580, 660] },
+  { id: 'destino', number: '06', short: 'Destination', title: 'Your next line starts today.', copy: 'Choose a topic. YouKnow handles the order. You only need to reach the next stop.', color: '#ff5b94', position: [580, 660] },
 ] as const
 
 const route = '650,-45 650,20 520,110 330,110 220,220 220,480 400,660 580,660 580,790 470,900 470,950'
@@ -52,7 +52,7 @@ export default function LandingPage({ onEnter }: { onEnter: () => void }) {
       </header>
 
       <aside className="metro-stage" aria-hidden="true">
-        <div className="route-wordmark">METRO / LEARNING LINE</div>
+        <div className="route-wordmark">YOUKNOW / LEARNING LINE</div>
         <svg viewBox="0 0 720 900" preserveAspectRatio="xMidYMid meet">
           <polyline className="route-track" points={route} pathLength="1" />
 
@@ -64,7 +64,8 @@ export default function LandingPage({ onEnter }: { onEnter: () => void }) {
             const [x, y] = stop.position
             return (
               <g key={stop.id} className={`route-station ${index === active ? 'active' : ''}`} style={{ '--station-color': stop.color } as CSSProperties}>
-                <circle className="station-halo" cx={x} cy={y} r="34" />
+                <circle className="station-pulse" cx={x} cy={y} r="24" />
+                <circle className="station-halo" cx={x} cy={y} r="54" />
                 <circle className="station-ring" cx={x} cy={y} r="16" />
                 <circle className="station-core" cx={x} cy={y} r="6" />
               </g>

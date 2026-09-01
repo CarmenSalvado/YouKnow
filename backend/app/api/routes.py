@@ -1,11 +1,11 @@
 import asyncio
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.models import GeneratePlanRequest, PlanResponse, StudyPreferences
-from app.services.llm import LLMClientError
+from app.models import ExpandLineRequest, GeneratePlanRequest, LineExpansionResponse, PlanResponse, StudyPreferences
+from app.services.llm import CompatibleLLMClient, LLMClientError
 from app.services.plan_service import PlanAnalysisError, PlanGenerationUnavailable, PlanService
 from app.services.source_ingestion import SourceIngestionError, normalize_pdf
 
@@ -13,6 +13,29 @@ from app.services.source_ingestion import SourceIngestionError, normalize_pdf
 router = APIRouter()
 settings = Settings.from_env()
 plan_service = PlanService(settings)
+providers = {
+    "openai": ("gpt-5-mini", None),
+    "qwen": ("qwen-plus", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+    "groq": ("openai/gpt-oss-20b", "https://api.groq.com/openai/v1"),
+    "gemini": ("gemini-3.7-flash", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+    "openrouter": ("openrouter/free", "https://openrouter.ai/api/v1"),
+}
+
+
+def service_for(api_key: str | None, provider: str | None) -> PlanService:
+    if not api_key:
+        return plan_service
+    key = api_key.strip()
+    if not 10 <= len(key) <= 256:
+        raise HTTPException(status_code=422, detail="API key must be between 10 and 256 characters.")
+    if provider not in providers:
+        raise HTTPException(status_code=422, detail="Unsupported AI provider.")
+    model, base_url = providers[provider]
+    return PlanService(
+        settings,
+        CompatibleLLMClient(api_key=key, model=model, base_url=base_url),
+        fallback_on_llm_error=False,
+    )
 
 
 @router.get("/health")
@@ -21,9 +44,9 @@ def health() -> dict[str, str]:
 
 
 @router.post("/api/plans/generate", response_model=PlanResponse)
-async def generate_plan(request: GeneratePlanRequest) -> PlanResponse:
+async def generate_plan(request: GeneratePlanRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider")) -> PlanResponse:
     try:
-        return await plan_service.generate(request)
+        return await service_for(api_key, provider).generate(request)
     except SourceIngestionError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except PlanGenerationUnavailable as error:
@@ -32,10 +55,20 @@ async def generate_plan(request: GeneratePlanRequest) -> PlanResponse:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
+@router.post("/api/plans/expand", response_model=LineExpansionResponse)
+async def expand_line(request: ExpandLineRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider")) -> LineExpansionResponse:
+    try:
+        return await service_for(api_key, provider).expand(request)
+    except (PlanAnalysisError, LLMClientError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
 @router.post("/api/plans/generate-file", response_model=PlanResponse)
 async def generate_plan_file(
     file: UploadFile = File(...),
     preferences: str = Form("{}"),
+    api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256),
+    provider: str | None = Header(default="openai", alias="X-LLM-Provider"),
 ) -> PlanResponse:
     try:
         study_preferences = StudyPreferences.model_validate_json(preferences)
@@ -46,7 +79,7 @@ async def generate_plan_file(
             file.filename or "document.pdf",
             max_upload_bytes=settings.max_upload_bytes,
         )
-        return await plan_service.generate_normalized(source, study_preferences)
+        return await service_for(api_key, provider).generate_normalized(source, study_preferences)
     except ValidationError as error:
         raise HTTPException(status_code=422, detail=f"invalid preferences: {error}") from error
     except SourceIngestionError as error:

@@ -25,6 +25,28 @@ def test_pdf_upload_validation_rejects_empty_content() -> None:
         normalize_pdf(b"", "document.pdf", max_upload_bytes=1024)
 
 
+def test_short_ui_api_key_is_rejected() -> None:
+    response = TestClient(app).post(
+        "/api/plans/generate",
+        headers={"X-LLM-API-Key": "short", "X-LLM-Provider": "qwen"},
+        json={"source": {"type": "topic", "value": "Roman history"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "API key must be between 10 and 256 characters."
+
+
+def test_ui_cannot_turn_backend_into_an_api_proxy() -> None:
+    response = TestClient(app).post(
+        "/api/plans/generate",
+        headers={"X-LLM-API-Key": "sk-test-key-long-enough", "X-LLM-Provider": "http://127.0.0.1"},
+        json={"source": {"type": "topic", "value": "Roman history"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Unsupported AI provider."
+
+
 def test_youtube_transcript_is_normalized(monkeypatch) -> None:
     fetched = [SimpleNamespace(text="Bees use waggle dances."), SimpleNamespace(text="Hives need careful management.")]
     fetched = type("Fetched", (list,), {"language": "English", "language_code": "en", "is_generated": False})(fetched)

@@ -5,11 +5,15 @@ from app.config import Settings
 from app.mock_data import QUANTUM_CONCEPTS, QUANTUM_DEPENDENCIES
 from app.models import (
     AnalyzedConcept,
+    Dependency,
+    ExpandLineRequest,
     GeneratePlanRequest,
+    LearningLine,
+    PrerequisiteAnalysis,
     RelationshipRepair,
     SourceAnalysis,
 )
-from app.services.llm import LLMClientError, OpenAILLMClient
+from app.services.llm import CompatibleLLMClient, LLMClientError, OpenAILLMClient
 from app.services.plan_service import PlanService
 
 
@@ -131,6 +135,27 @@ def test_openai_client_retries_invalid_structured_output_once() -> None:
     assert responses.calls == 2
 
 
+def test_compatible_client_requests_and_validates_json() -> None:
+    valid = RelationshipRepair(dependencies=[])
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            assert kwargs["response_format"] == {"type": "json_object"}
+            assert "Return only JSON matching this schema" in kwargs["messages"][0]["content"]
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=valid.model_dump_json()))])
+
+    sdk_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    result = asyncio.run(
+        CompatibleLLMClient(api_key="test", model="test-model", base_url="https://example.com", client=sdk_client).structured_completion(
+            system_prompt="system",
+            user_prompt="user",
+            response_model=RelationshipRepair,
+        )
+    )
+
+    assert result == valid
+
+
 def test_arbitrary_topic_generates_custom_local_plan_without_llm() -> None:
     plan = asyncio.run(
         PlanService(settings()).generate(
@@ -192,3 +217,26 @@ def test_narrow_topic_keeps_only_the_stations_returned_by_analysis() -> None:
 
     assert plan.title == "Binary Search"
     assert len(plan.concepts) == 4
+
+
+def test_expansion_count_and_named_lines_come_from_analysis() -> None:
+    concepts = quantum_analysis().concepts[:2]
+    analysis = PrerequisiteAnalysis(
+        concepts=concepts,
+        dependencies=[Dependency(concept_id=concepts[1].id, prerequisites=[concepts[0].id])],
+        lines=[LearningLine(
+            id="mathematical_tools",
+            name="Mathematical Tools",
+            description="The mathematical language needed before the destination.",
+            concept_ids=[concept.id for concept in concepts],
+        )],
+    )
+    expansion = asyncio.run(
+        PlanService(settings(), FakeLLMClient(analysis)).expand(
+            ExpandLineRequest(destination="Quantum Gates", existing_concepts=[])
+        )
+    )
+
+    assert len(expansion.concepts) == 2
+    assert expansion.lines[0].name == "Mathematical Tools"
+    assert expansion.connector_concept_ids == [concepts[1].id]

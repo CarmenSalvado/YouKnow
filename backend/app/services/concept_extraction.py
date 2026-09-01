@@ -4,6 +4,7 @@ from app.models import (
     Concept,
     Dependency,
     NormalizedSource,
+    PrerequisiteAnalysis,
     RelationshipRepair,
     SourceAnalysis,
     SourceType,
@@ -27,6 +28,17 @@ Rules:
 - Every prerequisite ID must match an extracted concept ID exactly.
 - Do not create self-dependencies or duplicate prerequisites.
 - Do not generate a calendar, study sessions, final order, levels, or a roadmap. Python calculates those.
+- Organize every concept into exactly one coherent metro line.
+- Give each line a short, memorable, subject-specific name. Never use generic names such as Foundation, Core, Advanced, or Application.
+- Create only as many lines as the knowledge structure needs, and list every concept ID exactly once across them.
+"""
+
+PREREQUISITE_SYSTEM_PROMPT = """You design the track that must come before one learning destination.
+Return only genuinely necessary prerequisite concepts, never the destination itself, later applications, optional enrichment, or concepts already present in the route.
+There is no target count and no minimum: return zero when the route already covers everything, few stations for a narrow gap, and many only when the destination genuinely requires them. Never pad.
+Use concrete domain-specific names, stable snake_case IDs, realistic focused-study minutes, and only prerequisite relationships whose IDs are in the response.
+Organize every returned concept into exactly one coherent metro line. Give each line a short, memorable, subject-specific name; never call a line Foundation, Core, Advanced, or Application.
+Do not generate a calendar, sessions, levels, or the destination node. Python validates, orders, and schedules the result.
 """
 
 
@@ -67,6 +79,22 @@ SOURCE CONTENT:
             response_model=SourceAnalysis,
         )
 
+    async def analyze_prerequisites(
+        self,
+        destination: str,
+        existing_concepts: list[str],
+    ) -> PrerequisiteAnalysis:
+        return await self.llm.structured_completion(
+            system_prompt=PREREQUISITE_SYSTEM_PROMPT,
+            user_prompt=(
+                f"DESTINATION: {destination}\n"
+                f"CONCEPTS ALREADY ON THE MAP: {existing_concepts}\n\n"
+                "Choose the complete minimum set that a motivated beginner still needs before this destination. "
+                "For source_evidence, explain briefly why each station is required. Set external_prerequisite=false."
+            ),
+            response_model=PrerequisiteAnalysis,
+        )
+
     async def repair_relationships(
         self,
         concept_ids: list[str],
@@ -88,5 +116,5 @@ SOURCE CONTENT:
         )
 
 
-def to_domain_concepts(analysis: SourceAnalysis) -> list[Concept]:
+def to_domain_concepts(analysis: SourceAnalysis | PrerequisiteAnalysis) -> list[Concept]:
     return [Concept(**concept.model_dump()) for concept in analysis.concepts]

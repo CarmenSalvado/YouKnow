@@ -73,6 +73,41 @@ class OpenAILLMClient:
         raise LLMClientError(f"LLM structured output remained invalid after one retry: {last_error}")
 
 
+class CompatibleLLMClient:
+    def __init__(self, *, api_key: str, model: str, base_url: str | None, client: Any | None = None) -> None:
+        self.model = model
+        self.client = client or AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+    async def structured_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[StructuredModel],
+    ) -> StructuredModel:
+        schema = json.dumps(response_model.model_json_schema(), separators=(",", ":"))
+        prompt = user_prompt
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": f"{system_prompt}\nReturn only JSON matching this schema: {schema}"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+                return response_model.model_validate_json(response.choices[0].message.content)
+            except (IndexError, ValidationError, TypeError, ValueError) as error:
+                last_error = error
+                if attempt == 0:
+                    prompt = f"{user_prompt}\n\nThe previous response was invalid: {error}. Return only valid JSON matching the schema."
+            except APIError as error:
+                raise LLMClientError(f"LLM request failed: {type(error).__name__}") from error
+        raise LLMClientError(f"LLM structured output remained invalid after one retry: {last_error}")
+
+
 class OllamaLLMClient:
     def __init__(self, *, model: str, base_url: str = "http://127.0.0.1:11434") -> None:
         self.model = model

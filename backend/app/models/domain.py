@@ -77,10 +77,24 @@ class Dependency(BaseModel):
     prerequisites: list[ConceptId] = Field(default_factory=list)
 
 
+class LearningLine(BaseModel):
+    id: ConceptId
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    concept_ids: list[ConceptId] = Field(min_length=1)
+
+
 class SourceAnalysis(BaseModel):
     title: str = Field(min_length=1)
     concepts: list[AnalyzedConcept] = Field(min_length=4, max_length=25)
     dependencies: list[Dependency]
+    lines: list[LearningLine] = Field(default_factory=list, max_length=8)
+
+
+class PrerequisiteAnalysis(BaseModel):
+    concepts: list[AnalyzedConcept] = Field(default_factory=list, max_length=25)
+    dependencies: list[Dependency] = Field(default_factory=list)
+    lines: list[LearningLine] = Field(default_factory=list, max_length=8)
 
 
 class RelationshipRepair(BaseModel):
@@ -121,6 +135,19 @@ class GeneratePlanRequest(BaseModel):
     preferences: StudyPreferences = Field(default_factory=StudyPreferences)
 
 
+class ExpandLineRequest(BaseModel):
+    destination: str = Field(min_length=1)
+    existing_concepts: list[str] = Field(default_factory=list, max_length=100)
+    preferences: StudyPreferences = Field(default_factory=StudyPreferences)
+
+    @field_validator("destination")
+    @classmethod
+    def strip_destination(cls, value: str) -> str:
+        if not (value := value.strip()):
+            raise ValueError("destination cannot be blank")
+        return value
+
+
 class StudySession(BaseModel):
     date: date
     concept_id: ConceptId
@@ -144,5 +171,16 @@ class PlanResponse(BaseModel):
     generation_mode: GenerationMode
     concepts: list[Concept]
     edges: list[Edge]
+    lines: list[LearningLine]
     schedule: list[StudySession]
     statistics: PlanStatistics
+
+
+class LineExpansionResponse(BaseModel):
+    destination: str
+    generation_mode: GenerationMode
+    concepts: list[Concept]
+    edges: list[Edge]
+    lines: list[LearningLine]
+    connector_concept_ids: list[ConceptId]
+    schedule: list[StudySession]

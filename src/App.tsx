@@ -9,6 +9,7 @@ import {
   Flame,
   Library,
   Map,
+  Pause,
   Play,
   Save,
   Send,
@@ -26,28 +27,39 @@ import { navigation, stations } from './mockData'
 const navIcons = [Map, CalendarDays, Library, BarChart3, Sparkles, Settings]
 
 type SourceType = 'topic' | 'text' | 'youtube' | 'pdf'
+type AIProvider = 'openai' | 'qwen' | 'groq' | 'gemini' | 'openrouter'
 type AccountId = 'quantum' | 'explorer'
 type Preferences = { sourceType: SourceType; topic: string; minutes: number; targetDate: string }
 type LessonState = 'ready' | 'active' | 'completed' | 'reviewing'
 type Notice = { kind: 'success' | 'error'; text: string }
 type PlanConcept = { id: string; name: string; description: string; estimated_minutes: number; category: 'foundation' | 'core' | 'advanced' | 'application'; level: number }
 type StudySession = { date: string; concept_id: string; duration_minutes: number }
+type PlanLine = { id: string; name: string; description: string; concept_ids: string[] }
 type Plan = {
   id: string
   title: string
   generation_mode?: 'ai' | 'curated' | 'structural'
   concepts: PlanConcept[]
   edges: { from: string; to: string }[]
+  lines?: PlanLine[]
   schedule: StudySession[]
   statistics: { concept_count: number; total_minutes: number; total_sessions: number; estimated_completion_date: string }
+}
+type LineExpansion = {
+  destination: string
+  generation_mode: 'ai' | 'structural'
+  concepts: PlanConcept[]
+  edges: { from: string; to: string }[]
+  lines: PlanLine[]
+  connector_concept_ids: string[]
+  schedule: StudySession[]
 }
 
 const planKey = 'metro-plan'
 const completedKey = 'metro-completed-sessions'
 const preferencesKey = 'metro-preferences'
-const activeAccountKey = 'metro-active-account'
 const accounts = {
-  quantum: { name: 'Alex Morgan', initials: 'AM', detail: 'Quantum demo' },
+  quantum: { name: 'Alex Morgan', initials: 'AM', detail: 'Quantum route' },
   explorer: { name: 'Maya Chen', initials: 'MC', detail: 'Empty route' },
 } as const
 const accountKey = (key: string, account: AccountId) => `${key}:${account}`
@@ -57,7 +69,7 @@ const defaultPreferences = (account: AccountId): Preferences => ({
   sourceType: 'topic',
   topic: account === 'quantum' ? 'Quantum Computing' : '',
   minutes: 30,
-  targetDate: new Date(Date.now() + 24 * 864e5).toISOString().slice(0, 10),
+  targetDate: '',
 })
 
 function readStored<T>(key: string, fallback: T): T {
@@ -72,23 +84,34 @@ function readStored<T>(key: string, fallback: T): T {
 const formatDate = (value: string) => new Intl.DateTimeFormat('en', {
   month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
 }).format(new Date(`${value}T00:00:00Z`))
+const completionDate = (plan: Plan | null) => plan ? formatDate(plan.statistics.estimated_completion_date) : 'Calculated after generation'
 
 const formatMinutes = (minutes: number) => `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 const categoryRoute = { foundation: 'blue', core: 'green', advanced: 'purple', application: 'orange' } as const
+const routeCategory = { blue: 'foundation', green: 'core', purple: 'advanced', orange: 'application' } as const
+const presetConcept = (station: (typeof stations)[number]): PlanConcept => ({ id: station.label, name: station.label, description: `Understand ${station.label} and how it connects to the wider Quantum Computing path.`, estimated_minutes: 30, category: routeCategory[station.route], level: 0 })
 
 function LessonTimer({ active, minutes }: { active: boolean; minutes: number }) {
   const [remaining, setRemaining] = useState(minutes * 60)
+  const [paused, setPaused] = useState(false)
 
   useEffect(() => {
     setRemaining(minutes * 60)
-    if (!active) return
-    const interval = window.setInterval(() => setRemaining(seconds => Math.max(0, seconds - 1)), 1000)
-    return () => window.clearInterval(interval)
+    setPaused(false)
   }, [active, minutes])
+
+  useEffect(() => {
+    if (!active || paused) return
+    const interval = window.setInterval(() => setRemaining(seconds => {
+      if (seconds <= 1) window.clearInterval(interval)
+      return Math.max(0, seconds - 1)
+    }), 1000)
+    return () => window.clearInterval(interval)
+  }, [active, paused])
 
   if (!active) return null
   const time = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`
-  return <div role="timer" aria-label="Lesson time remaining" className="mt-4 flex items-center justify-center gap-2 rounded-[6px] border border-[#2b5eaa] bg-[#0d2340] py-2 text-[#8db8ff]"><Clock3 size={15} /><time className="font-mono text-[18px] font-semibold tabular-nums">{time}</time><span className="text-[9px] font-semibold uppercase tracking-[.1em]">remaining</span></div>
+  return <div role="timer" aria-label="Lesson time remaining" className="lesson-timer mt-4"><Clock3 size={15} /><div><time>{time}</time><span>{paused ? 'paused' : 'remaining'}</span></div><button type="button" aria-label={paused ? 'Resume timer' : 'Pause timer'} aria-pressed={paused} onClick={() => setPaused(value => !value)}>{paused ? <Play size={13} fill="currentColor" /> : <Pause size={13} fill="currentColor" />}{paused ? 'Resume' : 'Pause'}</button></div>
 }
 
 function Sidebar({ active, account, onAccountChange, onNavigate }: { active: string; account: AccountId; onAccountChange: (account: AccountId) => void; onNavigate: (item: string) => void }) {
@@ -125,7 +148,7 @@ function Sidebar({ active, account, onAccountChange, onNavigate }: { active: str
         </div>
       </div>
 
-      <div className="account-switcher mx-4 mb-3" role="group" aria-label="Demo accounts">
+      <div className="account-switcher mx-4 mb-3" role="group" aria-label="Learning profiles">
         {(Object.keys(accounts) as AccountId[]).map(id => <button type="button" key={id} aria-pressed={account === id} onClick={() => onAccountChange(id)}><span>{accounts[id].initials}</span><span><strong>{accounts[id].name}</strong><small>{accounts[id].detail}</small></span>{account === id && <Check size={13} />}</button>)}
       </div>
 
@@ -139,19 +162,21 @@ function Sidebar({ active, account, onAccountChange, onNavigate }: { active: str
 }
 
 const generationStages = ['Reading your destination', 'Finding essential concepts', 'Connecting prerequisites', 'Scheduling your route']
+const expansionStages = ['Inspecting the selected stop', 'Tracing earlier prerequisites', 'Laying the new track', 'Opening previous stops']
 
-function RouteGeneration({ topic }: { topic: string }) {
+function RouteGeneration({ topic, expanding = false }: { topic: string; expanding?: boolean }) {
   const [stage, setStage] = useState(0)
+  const stages = expanding ? expansionStages : generationStages
 
   useEffect(() => {
-    const interval = window.setInterval(() => setStage(current => Math.min(generationStages.length - 1, current + 1)), 700)
+    const interval = window.setInterval(() => setStage(current => Math.min(stages.length - 1, current + 1)), 700)
     return () => window.clearInterval(interval)
-  }, [])
+  }, [stages.length])
 
-  return <div className="generation-screen" role="status" aria-live="polite" aria-label="Generating learning route">
+  return <div className="generation-screen" role="status" aria-live="polite" aria-label={expanding ? 'Extending learning line' : 'Generating learning route'}>
     <section className="generation-panel">
       <header><div><span className="live-dot" />ROUTE CONTROL / LIVE</div><small>ML–{String(stage + 1).padStart(2, '0')}</small></header>
-      <div className="generation-copy"><p>Destination analysis</p><h2>Building the line to<br /><span>{topic || 'your new subject'}</span></h2></div>
+      <div className="generation-copy"><p>{expanding ? 'Track extension' : 'Destination analysis'}</p><h2>{expanding ? 'Extending the line behind' : 'Building the line to'}<br /><span>{topic || 'your new subject'}</span></h2></div>
       <div className="generation-rail" aria-hidden="true">
         <svg viewBox="0 0 760 230">
           <path className="generation-track-shadow" d="M28 170 H175 L244 101 H390 L459 170 H732" />
@@ -161,8 +186,8 @@ function RouteGeneration({ topic }: { topic: string }) {
         </svg>
       </div>
       <div className="generation-status">
-        <ol>{generationStages.map((label, index) => <li className={index < stage ? 'done' : index === stage ? 'active' : ''} key={label}><span>{index < stage ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><small>{index < stage ? 'Cleared' : index === stage ? 'In progress' : 'Waiting'}</small></li>)}</ol>
-        <div className="generation-progress"><span style={{ transform: `scaleX(${(stage + 1) / generationStages.length})` }} /></div>
+        <ol>{stages.map((label, index) => <li className={index < stage ? 'done' : index === stage ? 'active' : ''} key={label}><span>{index < stage ? <Check size={12} /> : String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><small>{index < stage ? 'Cleared' : index === stage ? 'In progress' : 'Waiting'}</small></li>)}</ol>
+        <div className="generation-progress"><span style={{ transform: `scaleX(${(stage + 1) / stages.length})` }} /></div>
       </div>
     </section>
   </div>
@@ -172,11 +197,15 @@ function Control({ label, children, wide }: { label: string; children: React.Rea
   return <label className={`control block ${wide ? 'topic-control' : ''}`}><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">{label}</span>{children}</label>
 }
 
-function TopControls({ preferences, sourceFile, onChange, onFileChange, onGenerate, generating }: {
+function TopControls({ preferences, sourceFile, provider, apiKey, onChange, onFileChange, onProviderChange, onApiKeyChange, onGenerate, generating }: {
   preferences: Preferences
   sourceFile: File | null
+  provider: AIProvider
+  apiKey: string
   onChange: (preferences: Preferences) => void
   onFileChange: (file: File | null) => void
+  onProviderChange: (provider: AIProvider) => void
+  onApiKeyChange: (apiKey: string) => void
   onGenerate: () => void
   generating: boolean
 }) {
@@ -184,21 +213,22 @@ function TopControls({ preferences, sourceFile, onChange, onFileChange, onGenera
   const placeholders = { topic: 'e.g. Urban beekeeping', text: 'Paste the source material here', youtube: 'https://youtube.com/watch?v=…', pdf: '' }
   const hasSource = preferences.sourceType === 'pdf' ? !!sourceFile : !!preferences.topic.trim()
   return (
-    <header className="top-controls flex h-[78px] items-center gap-4">
+    <form className="top-controls flex h-[78px] items-center gap-4" onSubmit={event => { event.preventDefault(); if (hasSource && !generating) onGenerate() }}>
       <Control label="Learn from"><select aria-label="Learning source" className="control-field" value={preferences.sourceType} onChange={event => { onFileChange(null); onChange({ ...preferences, sourceType: event.target.value as SourceType, topic: '' }) }}><option value="topic">A topic</option><option value="text">Pasted text</option><option value="youtube">YouTube</option><option value="pdf">A PDF</option></select></Control>
       <Control label={labels[preferences.sourceType]} wide>{preferences.sourceType === 'pdf' ? <input key={preferences.sourceType} aria-label="PDF source" className="control-field file-field" type="file" accept="application/pdf,.pdf" onChange={event => onFileChange(event.target.files?.[0] ?? null)} /> : <input aria-label="Learning source content" className="control-field" value={preferences.topic} placeholder={placeholders[preferences.sourceType]} onChange={event => onChange({ ...preferences, topic: event.target.value })} />}</Control>
+      <div className="control ai-credentials"><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">AI provider / API key{apiKey && <i>ready</i>}</span><div><select aria-label="AI provider" value={provider} onChange={event => onProviderChange(event.target.value as AIProvider)}><option value="openai">OpenAI</option><option value="qwen">Qwen</option><option value="groq">Groq</option><option value="gemini">Gemini</option><option value="openrouter">OpenRouter</option></select><input aria-label="AI API key" type="password" value={apiKey} autoComplete="off" spellCheck={false} placeholder="API key · not saved" title="Used only for this tab and sent to your backend." onChange={event => onApiKeyChange(event.target.value)} /></div></div>
       <div className="ml-auto flex items-end gap-3">
         <Control label="Time per day">
           <select className="control-field" value={preferences.minutes} onChange={event => onChange({ ...preferences, minutes: Number(event.target.value) })}>
             {[15, 30, 45, 60, 90].map(minutes => <option key={minutes} value={minutes}>{minutes} min / day</option>)}
           </select>
         </Control>
-        <Control label="Goal date"><input className="control-field" type="date" min={new Date().toISOString().slice(0, 10)} required value={preferences.targetDate} onChange={event => onChange({ ...preferences, targetDate: event.target.value })} /></Control>
-        <button type="button" onClick={onGenerate} disabled={generating || !hasSource || !preferences.targetDate} className="generate-button flex h-10 items-center gap-2 rounded-[7px] bg-[#1759dc] px-5 text-[12px] font-semibold text-white hover:bg-[#1d68f5]">
+        <Control label="Deadline (optional)"><input className="control-field" type="date" min={new Date().toISOString().slice(0, 10)} value={preferences.targetDate} onChange={event => onChange({ ...preferences, targetDate: event.target.value })} /></Control>
+        <button type="submit" disabled={generating || !hasSource} className="generate-button flex h-10 items-center gap-2 rounded-[7px] bg-[#1759dc] px-5 text-[12px] font-semibold text-white hover:bg-[#1d68f5]">
           <WandSparkles size={16} className={generating ? 'spin' : ''} /> {generating ? 'Generating…' : 'Generate Plan'}
         </button>
       </div>
-    </header>
+    </form>
   )
 }
 
@@ -212,9 +242,18 @@ function StudyOverview({ preferences, plan, currentConcept, currentSession, less
   onLessonAction: () => void
   onViewPlan: () => void
 }) {
-  if (!plan && !preferences.topic) return <aside className="study-overview empty-overview overflow-hidden rounded-[10px] border border-line bg-panel"><section><span className="empty-platform">PLATFORM 00</span><CircleDot size={34} /><h2>No route on this account</h2><p>Choose a subject above. Metro will turn it into the concepts, dependencies, and sessions you need.</p></section></aside>
+  if (!plan && !preferences.topic) return <aside className="study-overview empty-overview overflow-hidden rounded-[10px] border border-line bg-panel"><section><span className="empty-platform">PLATFORM 00</span><CircleDot size={34} /><h2>No route on this account</h2><p>Choose a subject above. YouKnow will turn it into the concepts, dependencies, and sessions you need.</p></section></aside>
   const completed = lessonState === 'completed'
   const lessonLabel = lessonState === 'ready' ? 'Start Lesson' : lessonState === 'active' ? 'Complete Lesson' : lessonState === 'reviewing' ? 'Finish Review' : 'Review Lesson'
+  const routeTitle = (plan?.title ?? preferences.topic) || 'Your learning route'
+  const totalMinutes = plan?.statistics.total_minutes ?? stations.length * preferences.minutes
+  const dailyMinutes = plan?.schedule.reduce((days, session) => {
+    days[new Date(`${session.date}T00:00:00Z`).getUTCDay()] += session.duration_minutes
+    return days
+  }, [0, 0, 0, 0, 0, 0, 0]) ?? [0, 0, 0, 0, 0, 0, 0]
+  if (!plan) dailyMinutes[new Date().getDay()] = preferences.minutes
+  const busiestDay = Math.max(...dailyMinutes, 1)
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   return (
     <aside className="study-overview overflow-hidden rounded-[10px] border border-line bg-panel">
       <section className="border-b border-[#263448] p-5">
@@ -223,7 +262,7 @@ function StudyOverview({ preferences, plan, currentConcept, currentSession, less
           <div className={`lesson-icon grid h-12 w-12 shrink-0 place-items-center rounded-full border text-white ${completed ? 'border-[#35b879] bg-[#18855a]' : 'border-[#2a70e5] bg-[#1252c8]'}`}><CircleDot size={21} /></div>
           <div><p className="text-[13px] font-semibold text-[#f3f6fa]">{currentConcept?.name ?? 'Quantum Algorithms'}</p><p className="mt-1 text-[11px] text-muted">{currentConcept?.description ?? 'Entanglement & Superposition'}</p><p className="mt-1 text-[11px] text-muted">{currentSession?.duration_minutes ?? preferences.minutes} min</p></div>
         </div>
-        <LessonTimer active={lessonState === 'active' || lessonState === 'reviewing'} minutes={currentSession?.duration_minutes ?? preferences.minutes} />
+        <LessonTimer key={currentSession ? sessionKey(currentSession) : currentConcept?.id} active={lessonState === 'active' || lessonState === 'reviewing'} minutes={currentSession?.duration_minutes ?? preferences.minutes} />
         <button type="button" onClick={onLessonAction} className="lesson-button mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[6px] bg-[#175edc] text-[11px] font-semibold text-white">
           {lessonLabel} {lessonState === 'active' || lessonState === 'reviewing' ? <Check size={13} /> : <Play size={13} fill="currentColor" />}
         </button>
@@ -231,16 +270,16 @@ function StudyOverview({ preferences, plan, currentConcept, currentSession, less
 
       <section className="border-b border-[#263448] p-5">
         <p className="section-label text-[#dfe5ed]">Target milestone</p>
-        <div className="mt-5 flex items-center gap-3"><Target size={42} className="shrink-0 text-[#9850da]" /><div><p className="text-[12px] font-semibold text-[#f1f4f8]">{plan?.title ?? 'Quantum Algorithms'}</p><p className="mt-1 text-[10px] text-muted">Est. Completion</p><p className="mt-1 text-[11px] font-semibold text-[#a866e5]">{formatDate(plan?.statistics.estimated_completion_date ?? preferences.targetDate)}</p></div></div>
-        <div className="mt-5 h-1.5 overflow-hidden rounded-sm bg-[#1b2a3d]"><span className="milestone-progress block h-full bg-[#1f70f4]" style={{ width: `${progress}%` }} /></div>
+        <div className="mt-5 flex items-center gap-3"><Target size={42} className="shrink-0 text-[#9850da]" /><div><p className="text-[12px] font-semibold text-[#f1f4f8]">{routeTitle}</p><p className="mt-1 text-[10px] text-muted">{plan ? 'Estimated completion' : 'Schedule'}</p><p className="mt-1 text-[11px] font-semibold text-[#a866e5]">{plan ? completionDate(plan) : preferences.targetDate ? formatDate(preferences.targetDate) : 'Self-paced route'}</p></div></div>
+        <div className="mt-5 h-1.5 overflow-hidden rounded-sm bg-[#1b2a3d]" role="progressbar" aria-label="Learning path progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}><span className="milestone-progress block h-full bg-[#1f70f4]" style={{ width: `${progress}%` }} /></div>
         <p className="mt-2 text-[10px] text-[#9ca7b7]">{progress}% of path completed</p>
       </section>
 
       <section className="p-5">
-        <p className="section-label text-[#dfe5ed]">Total study time</p>
-        <div className="mt-5 flex items-start"><Clock3 size={20} className="mr-3 mt-1 text-muted" /><div><p className="text-[20px] font-medium text-[#f1f4f8]">{plan ? formatMinutes(plan.statistics.total_minutes) : '46h 30m'}</p><p className="text-[10px] text-muted">Total Hours</p></div><div className="ml-auto border-l border-[#263448] pl-4"><p className="text-[10px] text-muted">Avg. / Day</p><p className="mt-1 text-[17px] font-medium text-[#f1f4f8]">{preferences.minutes} min</p></div></div>
+        <p className="section-label text-[#dfe5ed]">Planned study time</p>
+        <div className="mt-5 flex items-start"><Clock3 size={20} className="mr-3 mt-1 text-muted" /><div><p className="text-[20px] font-medium text-[#f1f4f8]">{formatMinutes(totalMinutes)}</p><p className="text-[10px] text-muted">{plan ? 'Scheduled total' : 'Route estimate'}</p></div><div className="ml-auto border-l border-[#263448] pl-4"><p className="text-[10px] text-muted">Per session</p><p className="mt-1 text-[17px] font-medium text-[#f1f4f8]">{preferences.minutes} min</p></div></div>
         <div className="study-bars mt-4 flex h-12 items-end justify-between gap-3">
-          {[16, 31, 44, 35, 27, 21, 0].map((height, index) => <div key={index} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5"><span className={`w-3 rounded-t-sm ${index === 3 ? 'bg-[#2478ff]' : 'bg-[#173467]'}`} style={{ height }} /><small className={index === 3 ? 'text-[#6da4ff]' : 'text-muted'}>{['S','M','T','W','T','F','S'][index]}</small></div>)}
+          {dailyMinutes.map((minutes, index) => <button type="button" onClick={onViewPlan} aria-label={`${dayLabels[index]}: ${minutes} planned minutes. Open study plan.`} title={`${dayLabels[index]} · ${minutes} min`} key={dayLabels[index]}><span className={`study-bar-fill ${index === new Date().getDay() ? 'bg-[#2478ff]' : 'bg-[#173467]'}`} style={{ height: Math.max(3, Math.round(minutes / busiestDay * 36)) }} /><small className={index === new Date().getDay() ? 'text-[#6da4ff]' : 'text-muted'}>{dayLabels[index][0]}</small></button>)}
         </div>
       </section>
     </aside>
@@ -315,9 +354,9 @@ function SettingsView({ onSaved }: { onSaved: () => void }) {
   )
 }
 
-function WorkspaceView({ active, demoAccount, preferences, plan, currentConcept, currentSession, completedSessions, lessonState, progress, onLessonAction, onViewPlan, onOpenConcept, onStartSession, onNavigate, onNotice }: {
+function WorkspaceView({ active, presetAccount, preferences, plan, currentConcept, currentSession, completedSessions, lessonState, progress, onLessonAction, onViewPlan, onOpenConcept, onStartSession, onNavigate, onNotice }: {
   active: string
-  demoAccount: boolean
+  presetAccount: boolean
   preferences: Preferences
   plan: Plan | null
   currentConcept: PlanConcept | null
@@ -333,11 +372,48 @@ function WorkspaceView({ active, demoAccount, preferences, plan, currentConcept,
   onNotice: (notice: Notice) => void
 }) {
   const upcoming = plan?.schedule.filter(session => !completedSessions.includes(sessionKey(session))).slice(0, 8)
-  const concepts = plan?.concepts ?? (demoAccount ? stations.map((station, index) => ({ id: String(index), name: station.label, description: '', estimated_minutes: preferences.minutes, category: ({ blue: 'foundation', green: 'core', purple: 'advanced', orange: 'application' } as const)[station.route], level: 0 })) : [])
+  const concepts = plan?.concepts ?? (presetAccount ? stations.map(presetConcept) : [])
 
   if (active === 'Study Plan') return <div className="workspace-view study-plan-view"><section className="workspace-card session-card"><p className="section-label">Upcoming sessions</p><h1>Your next stops</h1><p className="workspace-copy">Choose any stop to start that lesson.</p><div className="session-list">{(upcoming ?? concepts.slice(15, 21).map(concept => ({ date: '', concept_id: concept.id, duration_minutes: preferences.minutes }))).map((session, index) => <button type="button" onClick={() => onStartSession(session)} key={`${session.date}-${session.concept_id}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><strong>{concepts.find(concept => concept.id === session.concept_id)?.name}</strong><small>{session.date ? `${formatDate(session.date)} · ` : ''}{session.duration_minutes} min <Play size={10} /></small></button>)}</div>{upcoming?.length === 0 && <p className="workspace-copy">All scheduled sessions are complete.</p>}</section><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div>
 
-  if (active === 'Library') return <section className="workspace-card library-view"><p className="section-label">Concept library</p><h1>{plan?.title ?? preferences.topic}</h1><p className="workspace-copy">Every concept in your route, grouped by metro line. Select one to locate it on the map.</p><div className="concept-grid">{concepts.map(concept => <button type="button" onClick={() => onOpenConcept(concept)} key={concept.id} title={concept.description}><i className={`route-dot ${categoryRoute[concept.category]}`} /><span>{concept.name}</span><small>{concept.category} · {concept.estimated_minutes} min <ChevronRight size={10} /></small></button>)}</div></section>
+  if (active === 'Library') {
+    const stages = [
+      { category: 'foundation', number: '01', label: 'Foundations', description: 'The ideas everything else depends on.' },
+      { category: 'core', number: '02', label: 'Core concepts', description: 'The working language of the subject.' },
+      { category: 'advanced', number: '03', label: 'Advanced', description: 'Deeper models and harder connections.' },
+      { category: 'application', number: '04', label: 'Applications', description: 'Turn knowledge into practical skill.' },
+    ] as const
+    const featured = currentConcept ?? concepts[0]
+    const totalMinutes = concepts.reduce((sum, concept) => sum + concept.estimated_minutes, 0)
+
+    if (!featured) return <section className="workspace-card library-view library-empty"><Library size={34} /><p className="section-label">Concept library</p><h1>Your library starts with a route.</h1><p className="workspace-copy">Create a learning map and every concept will be organized here automatically.</p><button type="button" onClick={() => onNavigate('Learning Map')}>Build my route <ChevronRight size={15} /></button></section>
+
+    return <section className="workspace-card library-view">
+      <header className="library-hero">
+        <div><p className="section-label">Concept library</p><h1>{plan?.title ?? preferences.topic}</h1><p>Explore the route by stage. Every card takes you directly to that concept on the map.</p></div>
+        <div className="library-summary" aria-label="Library summary"><span><strong>{concepts.length}</strong> concepts</span><span><strong>{formatMinutes(totalMinutes)}</strong> learning time</span></div>
+      </header>
+
+      <div className="library-composition">
+        <button type="button" className={`library-feature ${categoryRoute[featured.category]}`} onClick={() => onOpenConcept(featured)}>
+          <span className="library-feature-label"><i />Current focus</span>
+          <div><small>{featured.category} · {featured.estimated_minutes} min</small><h2>{featured.name}</h2><p>{featured.description}</p></div>
+          <span className="library-feature-action">Open on map <ChevronRight size={16} /></span>
+        </button>
+
+        <div className="library-stages">
+          {stages.map(stage => {
+            const stageConcepts = concepts.filter(concept => concept.category === stage.category)
+            if (!stageConcepts.length) return null
+            return <section className={`library-stage ${categoryRoute[stage.category]}`} key={stage.category}>
+              <header><span>{stage.number}</span><div><h2>{stage.label}</h2><p>{stage.description}</p></div><strong>{stageConcepts.length}</strong></header>
+              <div className="concept-grid">{stageConcepts.map((concept, index) => <button type="button" onClick={() => onOpenConcept(concept)} key={concept.id} title={concept.description}><span className="concept-number">{String(index + 1).padStart(2, '0')}</span><div><strong>{concept.name}</strong><p>{concept.description}</p><small><i className={`route-dot ${categoryRoute[concept.category]}`} />{concept.estimated_minutes} min <ChevronRight size={11} /></small></div></button>)}</div>
+            </section>
+          })}
+        </div>
+      </div>
+    </section>
+  }
 
   if (active === 'Progress') {
     const totalSessions = plan?.schedule.length ?? concepts.length
@@ -368,7 +444,7 @@ function WorkspaceView({ active, demoAccount, preferences, plan, currentConcept,
           <article><span>Lessons done</span><strong>{completedCount}<small> / {totalSessions}</small></strong></article>
           <article><span>Time invested</span><strong>{formatMinutes(studiedMinutes)}</strong></article>
           <article><span>Remaining</span><strong>{Math.max(0, totalSessions - completedCount)}<small> lessons</small></strong></article>
-          <article><span>Goal date</span><strong className="metric-date">{formatDate(plan?.statistics.estimated_completion_date ?? preferences.targetDate)}</strong></article>
+          <article><span>Estimated mastery</span><strong className="metric-date">{completionDate(plan)}</strong></article>
         </div>
 
         <article className="progress-panel route-breakdown">
@@ -380,7 +456,7 @@ function WorkspaceView({ active, demoAccount, preferences, plan, currentConcept,
           <p className="section-label">{!hasRoute ? 'Build your route' : progress === 100 ? 'Keep it fresh' : 'Next stop'}</p>
           <h2>{currentConcept?.name ?? (hasRoute ? 'Choose your next lesson' : 'Create your first learning plan')}</h2>
           <p>{currentConcept?.description || 'Generate a learning route to get a personalized next step.'}</p>
-          <div className="next-stop-meta"><span><Clock3 size={14} />{currentSession?.duration_minutes ?? preferences.minutes} min</span><span><Target size={14} />{formatDate(plan?.statistics.estimated_completion_date ?? preferences.targetDate)}</span></div>
+          <div className="next-stop-meta"><span><Clock3 size={14} />{currentSession?.duration_minutes ?? preferences.minutes} min</span><span><Target size={14} />{completionDate(plan)}</span></div>
           <button type="button" onClick={() => { onLessonAction(); onNavigate('Learning Map') }}>{actionLabel}<Play size={13} fill="currentColor" /></button>
         </article>
       </div>
@@ -392,35 +468,42 @@ function WorkspaceView({ active, demoAccount, preferences, plan, currentConcept,
 }
 
 function Dashboard() {
-  const [account, setAccount] = useState<AccountId>(() => readStored(activeAccountKey, 'explorer'))
+  const [account, setAccount] = useState<AccountId>('explorer')
   const [activeNav, setActiveNav] = useState('Learning Map')
   const [preferences, setPreferences] = useState<Preferences>(() => readStored(accountKey(preferencesKey, account), defaultPreferences(account)))
   const [sourceFile, setSourceFile] = useState<File | null>(null)
+  const [provider, setProvider] = useState<AIProvider>('openai')
+  const [apiKey, setApiKey] = useState('')
   const [plan, setPlan] = useState<Plan | null>(() => readStored(accountKey(planKey, account), null))
   const [completedSessions, setCompletedSessions] = useState<string[]>(() => readStored(accountKey(completedKey, account), []))
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [focusedConceptId, setFocusedConceptId] = useState<string | undefined>()
-  const [demoLessonState, setDemoLessonState] = useState<LessonState>('ready')
+  const [presetLessonState, setPresetLessonState] = useState<LessonState>('ready')
   const [generating, setGenerating] = useState(false)
+  const [expandingTopic, setExpandingTopic] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const currentSession = useMemo(() => plan?.schedule.find(session => sessionKey(session) === activeSession) ?? plan?.schedule.find(session => !completedSessions.includes(sessionKey(session))) ?? plan?.schedule[plan.schedule.length - 1] ?? null, [plan, completedSessions, activeSession])
-  const currentConcept = plan?.concepts.find(concept => concept.id === currentSession?.concept_id) ?? null
-  const lessonState: LessonState = plan ? (!currentSession ? 'completed' : activeSession === sessionKey(currentSession) ? completedSessions.includes(activeSession) ? 'reviewing' : 'active' : completedSessions.includes(sessionKey(currentSession)) ? 'completed' : 'ready') : demoLessonState
-  const progress = plan ? plan.schedule.length ? Math.round(completedSessions.length / plan.schedule.length * 100) : 0 : account === 'quantum' ? demoLessonState === 'completed' ? 72 : 68 : 0
+  const selectedPresetStation = account === 'quantum' ? stations.find(station => station.label === focusedConceptId) ?? stations.find(station => station.current) : undefined
+  const currentConcept = plan?.concepts.find(concept => concept.id === currentSession?.concept_id) ?? (selectedPresetStation ? presetConcept(selectedPresetStation) : null)
+  const lessonState: LessonState = plan ? (!currentSession ? 'completed' : activeSession === sessionKey(currentSession) ? completedSessions.includes(activeSession) ? 'reviewing' : 'active' : completedSessions.includes(sessionKey(currentSession)) ? 'completed' : 'ready') : presetLessonState
+  const progress = plan ? plan.schedule.length ? Math.round(completedSessions.length / plan.schedule.length * 100) : 0 : account === 'quantum' && presetLessonState === 'completed' ? Math.round(100 / stations.length) : 0
+  const completedConceptIds = useMemo(() => plan?.concepts.filter(concept => {
+    const sessions = plan.schedule.filter(session => session.concept_id === concept.id)
+    return sessions.length > 0 && sessions.every(session => completedSessions.includes(sessionKey(session)))
+  }).map(concept => concept.id) ?? [], [plan, completedSessions])
 
   const switchAccount = (next: AccountId) => {
     if (next === account) return
     setAccount(next)
-    localStorage.setItem(activeAccountKey, JSON.stringify(next))
     setPreferences(readStored(accountKey(preferencesKey, next), defaultPreferences(next)))
     setPlan(readStored(accountKey(planKey, next), null))
     setCompletedSessions(readStored(accountKey(completedKey, next), []))
     setSourceFile(null)
     setActiveSession(null)
     setFocusedConceptId(undefined)
-    setDemoLessonState('ready')
+    setPresetLessonState('ready')
     setActiveNav('Learning Map')
-    setNotice({ kind: 'success', text: next === 'quantum' ? 'Quantum demo account loaded.' : 'Empty Explorer account loaded. Choose a topic to begin.' })
+    setNotice({ kind: 'success', text: next === 'quantum' ? 'Quantum route loaded.' : 'Empty Explorer account loaded. Choose a topic to begin.' })
   }
 
   const changePreferences = (next: Preferences) => {
@@ -429,16 +512,16 @@ function Dashboard() {
   }
 
   const openConcept = (concept: PlanConcept) => {
-    setFocusedConceptId(plan ? concept.id : undefined)
+    setFocusedConceptId(concept.id)
     setActiveNav('Learning Map')
-    if (!plan) setNotice({ kind: 'success', text: 'Generate your plan to focus individual stations.' })
+    if (!plan) setNotice({ kind: 'success', text: account === 'quantum' ? `${concept.name} focused on the learning map.` : 'Generate your plan to focus individual stations.' })
   }
 
   const startSession = (session: StudySession) => {
     setActiveNav('Learning Map')
     if (!plan) {
-      setDemoLessonState('active')
-      setNotice({ kind: 'success', text: 'Demo lesson started. Your timer is running.' })
+      setPresetLessonState('active')
+      setNotice({ kind: 'success', text: 'Lesson started. Your timer is running.' })
       return
     }
     setFocusedConceptId(session.concept_id)
@@ -446,39 +529,136 @@ function Dashboard() {
     setNotice({ kind: 'success', text: `${plan.concepts.find(concept => concept.id === session.concept_id)?.name ?? 'Lesson'} started.` })
   }
 
+  const startConcept = (conceptId: string) => {
+    if (!plan) {
+      if (account === 'explorer') return
+      setFocusedConceptId(conceptId)
+      setPresetLessonState('active')
+      setNotice({ kind: 'success', text: `${conceptId} started. Your timer is running.` })
+      return
+    }
+    const sessions = plan.schedule.filter(session => session.concept_id === conceptId)
+    const session = sessions.find(item => !completedSessions.includes(sessionKey(item))) ?? sessions[sessions.length - 1]
+    if (session) startSession(session)
+  }
+
+  const requestPlan = async (sourceType: SourceType, value: string, file: File | null) => {
+    const studyPreferences = { minutes_per_day: preferences.minutes, target_date: preferences.targetDate || undefined }
+    const headers: Record<string, string> = apiKey.trim() ? { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider } : {}
+    let request: Promise<Response>
+    if (sourceType === 'pdf') {
+        const form = new FormData()
+        form.append('file', file!)
+        form.append('preferences', JSON.stringify(studyPreferences))
+        request = fetch('/api/plans/generate-file', { method: 'POST', headers, body: form })
+    } else {
+      request = fetch('/api/plans/generate', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: { type: sourceType, value }, preferences: studyPreferences }),
+      })
+    }
+    const [response] = await Promise.all([request, new Promise(resolve => window.setTimeout(resolve, 2800))])
+    const body = await response.json().catch(() => ({})) as Plan & { detail?: string }
+    if (!response.ok) throw new Error(body.detail ?? 'Plan generation failed. Is the API running?')
+    return body
+  }
+
   const generatePlan = async () => {
     setGenerating(true)
+    setExpandingTopic(null)
     setNotice(null)
     try {
-      const studyPreferences = { minutes_per_day: preferences.minutes, target_date: preferences.targetDate }
-      let request: Promise<Response>
-      if (preferences.sourceType === 'pdf') {
-        const form = new FormData()
-        form.append('file', sourceFile!)
-        form.append('preferences', JSON.stringify(studyPreferences))
-        request = fetch('/api/plans/generate-file', { method: 'POST', body: form })
-      } else {
-        request = fetch('/api/plans/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: { type: preferences.sourceType, value: preferences.topic }, preferences: studyPreferences }),
-        })
-      }
-      const [response] = await Promise.all([request, new Promise(resolve => window.setTimeout(resolve, 2800))])
-      const body = await response.json().catch(() => ({})) as Plan & { detail?: string }
-      if (!response.ok) throw new Error(body.detail ?? 'Plan generation failed. Is the API running?')
+      const body = await requestPlan(preferences.sourceType, preferences.topic, sourceFile)
       setPlan(body)
       localStorage.setItem(accountKey(planKey, account), JSON.stringify(body))
       setCompletedSessions([])
       localStorage.removeItem(accountKey(completedKey, account))
       setActiveSession(null)
       setFocusedConceptId(body.schedule[0]?.concept_id)
-      setNotice({ kind: 'success', text: body.generation_mode === 'structural' ? `Draft route ready with ${body.statistics.concept_count} stations. Connect OpenAI or Ollama for subject-specific analysis.` : `Custom route ready with ${body.statistics.concept_count} necessary stations.` })
+      setNotice({ kind: 'success', text: body.generation_mode === 'structural' ? `Draft route ready with ${body.statistics.concept_count} stations. Add an API key or start Ollama for subject-specific analysis.` : `Custom route ready with ${body.statistics.concept_count} necessary stations.` })
       setActiveNav('Learning Map')
     } catch (error) {
       setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Could not generate the plan.' })
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const requestExpansion = async (destination: string) => {
+    const request = fetch('/api/plans/expand', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(apiKey.trim() && { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider }) },
+      body: JSON.stringify({
+        destination,
+        existing_concepts: plan?.concepts.map(concept => concept.name) ?? [],
+        preferences: { minutes_per_day: preferences.minutes, target_date: preferences.targetDate || undefined },
+      }),
+    })
+    const [response] = await Promise.all([request, new Promise(resolve => window.setTimeout(resolve, 2800))])
+    const body = await response.json().catch(() => ({})) as LineExpansion & { detail?: string }
+    if (!response.ok) throw new Error(body.detail ?? 'Line extension failed. Is the API running?')
+    return body
+  }
+
+  const expandConcept = async (conceptId: string, conceptName: string) => {
+    const prefix = `extension:${conceptId}:`
+    if (plan?.concepts.some(concept => concept.id.startsWith(prefix))) {
+      setNotice({ kind: 'success', text: 'This station already has an extended prerequisite line.' })
+      return
+    }
+    setGenerating(true)
+    setExpandingTopic(conceptName)
+    setNotice(null)
+    try {
+      if (!plan) {
+        const branch = await requestPlan('topic', conceptName, null)
+        setPlan(branch)
+        localStorage.setItem(accountKey(planKey, account), JSON.stringify(branch))
+        setCompletedSessions([])
+        localStorage.removeItem(accountKey(completedKey, account))
+        setActiveSession(null)
+        setFocusedConceptId(branch.schedule[0]?.concept_id)
+        setNotice({ kind: 'success', text: `Detailed line ready with ${branch.statistics.concept_count} prerequisite stops.` })
+        return
+      }
+
+      const branch = await requestExpansion(conceptName)
+      if (!branch.concepts.length) {
+        setNotice({ kind: 'success', text: 'This station already has every necessary prerequisite.' })
+        return
+      }
+      const shift = Math.max(...branch.concepts.map(concept => concept.level), 0) + 1
+      const addedConcepts = branch.concepts.map(concept => ({ ...concept, id: `${prefix}${concept.id}` }))
+      const addedEdges = branch.edges.map(edge => ({ from: `${prefix}${edge.from}`, to: `${prefix}${edge.to}` }))
+      const connectors = branch.connector_concept_ids.map(id => ({ from: `${prefix}${id}`, to: conceptId }))
+      const addedSchedule = branch.schedule.map(session => ({ ...session, concept_id: `${prefix}${session.concept_id}` }))
+      const addedLines = branch.lines.map(line => ({ ...line, id: `${prefix}line:${line.id}`, concept_ids: line.concept_ids.map(id => `${prefix}${id}`) }))
+      const concepts = [...addedConcepts, ...plan.concepts.map(concept => ({ ...concept, level: concept.level + shift }))]
+      const schedule = [...addedSchedule, ...plan.schedule]
+      const updated: Plan = {
+        ...plan,
+        concepts,
+        edges: [...addedEdges, ...connectors, ...plan.edges],
+        lines: [...addedLines, ...(plan.lines ?? [])],
+        schedule,
+        statistics: {
+          concept_count: concepts.length,
+          total_minutes: concepts.reduce((sum, concept) => sum + concept.estimated_minutes, 0),
+          total_sessions: schedule.length,
+          estimated_completion_date: schedule.reduce((latest, session) => session.date > latest ? session.date : latest, plan.statistics.estimated_completion_date),
+        },
+      }
+      setPlan(updated)
+      localStorage.setItem(accountKey(planKey, account), JSON.stringify(updated))
+      setActiveSession(null)
+      setFocusedConceptId(conceptId)
+      setNotice({ kind: 'success', text: `Added ${addedConcepts.length} necessary stops across ${addedLines.length} ${addedLines.length === 1 ? 'line' : 'lines'}: ${addedLines.map(line => line.name).join(', ')}.` })
+    } catch (error) {
+      setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Could not extend the line.' })
+    } finally {
+      setGenerating(false)
+      setExpandingTopic(null)
     }
   }
 
@@ -488,8 +668,8 @@ function Dashboard() {
         setNotice({ kind: 'success', text: 'Choose a topic before starting your first lesson.' })
         return
       }
-      const next = demoLessonState === 'ready' ? 'active' : demoLessonState === 'active' ? 'completed' : 'active'
-      setDemoLessonState(next)
+      const next = presetLessonState === 'ready' ? 'active' : presetLessonState === 'active' ? 'completed' : 'active'
+      setPresetLessonState(next)
       setNotice({ kind: 'success', text: next === 'completed' ? 'Lesson completed. Progress updated.' : 'Lesson started. Your timer is running.' })
       return
     }
@@ -518,10 +698,10 @@ function Dashboard() {
     <div className="app-shell min-h-screen bg-ink text-white">
       <Sidebar active={activeNav} account={account} onAccountChange={switchAccount} onNavigate={setActiveNav} />
       <main className="main-column min-w-0 px-5 pb-5">
-        <TopControls preferences={preferences} sourceFile={sourceFile} onChange={changePreferences} onFileChange={setSourceFile} onGenerate={generatePlan} generating={generating} />
-        {activeNav === 'Learning Map' ? <div className="dashboard-grid min-h-0"><LearningMap title={(plan?.title ?? preferences.topic) || 'Your learning route'} concepts={plan?.concepts} edges={plan?.edges} currentConceptId={focusedConceptId ?? currentConcept?.id} empty={!plan && account === 'explorer'} /><StudyOverview preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} lessonState={lessonState} progress={progress} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} /><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div> : <WorkspaceView active={activeNav} demoAccount={account === 'quantum'} preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} completedSessions={completedSessions} lessonState={lessonState} progress={progress} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} onOpenConcept={openConcept} onStartSession={startSession} onNavigate={setActiveNav} onNotice={setNotice} />}
+        <TopControls preferences={preferences} sourceFile={sourceFile} provider={provider} apiKey={apiKey} onChange={changePreferences} onFileChange={setSourceFile} onProviderChange={setProvider} onApiKeyChange={setApiKey} onGenerate={generatePlan} generating={generating} />
+        {activeNav === 'Learning Map' ? <div className="dashboard-grid min-h-0"><LearningMap title={(plan?.title ?? preferences.topic) || 'Your learning route'} concepts={plan?.concepts} edges={plan?.edges} lines={plan?.lines} currentConceptId={focusedConceptId ?? currentConcept?.id} completedConceptIds={completedConceptIds} empty={!plan && account === 'explorer'} canGenerate={preferences.sourceType === 'pdf' ? !!sourceFile : !!preferences.topic.trim()} generating={generating} onGenerate={generatePlan} onStartConcept={startConcept} onExpandConcept={expandConcept} /><StudyOverview preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} lessonState={lessonState} progress={progress} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} /><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div> : <WorkspaceView active={activeNav} presetAccount={account === 'quantum'} preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} completedSessions={completedSessions} lessonState={lessonState} progress={progress} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} onOpenConcept={openConcept} onStartSession={startSession} onNavigate={setActiveNav} onNotice={setNotice} />}
       </main>
-      {generating && <RouteGeneration topic={preferences.topic} />}
+      {generating && <RouteGeneration topic={expandingTopic ?? preferences.topic} expanding={!!expandingTopic} />}
       {notice && <div className={`dashboard-notice ${notice.kind}`} role="status"><span>{notice.text}</span><button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></button></div>}
     </div>
   )

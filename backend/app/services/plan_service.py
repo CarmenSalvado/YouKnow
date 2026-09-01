@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from app.config import Settings
 from app.mock_data import QUANTUM_CONCEPTS, QUANTUM_DEPENDENCIES
-from app.models import Concept, ConceptCategory, Dependency, GeneratePlanRequest, GenerationMode, NormalizedSource, PlanResponse, SourceType, StudyPreferences
+from app.models import Concept, ConceptCategory, Dependency, ExpandLineRequest, GeneratePlanRequest, GenerationMode, LearningLine, LineExpansionResponse, NormalizedSource, PlanResponse, SourceType, StudyPreferences
 from app.services.concept_extraction import ConceptAnalysisService, to_domain_concepts
 from app.services.graph_builder import GraphResult, GraphValidationError, build_graph
 from app.services.llm import LLMClient, LLMClientError, OllamaLLMClient, OpenAILLMClient
@@ -22,8 +22,9 @@ class PlanAnalysisError(RuntimeError):
 
 
 class PlanService:
-    def __init__(self, settings: Settings, llm_client: LLMClient | None = None) -> None:
+    def __init__(self, settings: Settings, llm_client: LLMClient | None = None, *, fallback_on_llm_error: bool = True) -> None:
         self.settings = settings
+        self.fallback_on_llm_error = fallback_on_llm_error
         if llm_client is None and settings.llm_api_key and settings.llm_model:
             llm_client = OpenAILLMClient(
                 api_key=settings.llm_api_key,
@@ -52,9 +53,10 @@ class PlanService:
                 analysis = await self.analysis_service.analyze(source)
                 concepts = to_domain_concepts(analysis)
                 graph = await self._validated_ai_graph(concepts, analysis.dependencies)
-                return self._plan(analysis.title, graph, preferences, GenerationMode.AI)
+                return self._plan(analysis.title, graph, preferences, GenerationMode.AI, analysis.lines)
             except (LLMClientError, PlanAnalysisError, GraphValidationError):
-                pass
+                if not self.fallback_on_llm_error:
+                    raise
 
         if source.source_type is SourceType.TOPIC and source.title.casefold() in {
             "quantum computing",
@@ -67,6 +69,45 @@ class PlanService:
                 GenerationMode.CURATED,
             )
         return self._plan(source.title, self._local_graph(source), preferences, GenerationMode.STRUCTURAL)
+
+    async def expand(self, request: ExpandLineRequest) -> LineExpansionResponse:
+        if self.analysis_service:
+            try:
+                analysis = await self.analysis_service.analyze_prerequisites(
+                    request.destination,
+                    request.existing_concepts,
+                )
+                concepts, dependencies = self._without_existing(
+                    to_domain_concepts(analysis),
+                    analysis.dependencies,
+                    request.existing_concepts,
+                )
+                if not concepts:
+                    return self._empty_expansion(request.destination, GenerationMode.AI)
+                graph = await self._validated_ai_graph(concepts, dependencies)
+                return self._expansion(request, graph, GenerationMode.AI, analysis.lines)
+            except (LLMClientError, PlanAnalysisError, GraphValidationError):
+                if not self.fallback_on_llm_error:
+                    raise
+
+        source = NormalizedSource(
+            source_type=SourceType.TOPIC,
+            title=request.destination,
+            content=request.destination,
+        )
+        local = self._local_graph(source)
+        concepts, dependencies = self._without_existing(
+            [concept for concept in local.concepts if concept.category is not ConceptCategory.APPLICATION],
+            [Dependency(concept_id=edge.to_concept, prerequisites=[edge.from_concept]) for edge in local.edges],
+            request.existing_concepts,
+        )
+        if not concepts:
+            return self._empty_expansion(request.destination, GenerationMode.STRUCTURAL)
+        return self._expansion(
+            request,
+            build_graph(concepts, dependencies),
+            GenerationMode.STRUCTURAL,
+        )
 
     @staticmethod
     def _local_graph(source: NormalizedSource) -> GraphResult:
@@ -119,7 +160,65 @@ class PlanService:
                 raise PlanAnalysisError(f"LLM relationships remained invalid: {repaired_error}") from repaired_error
 
     @staticmethod
-    def _plan(title: str, graph: GraphResult, preferences: StudyPreferences, generation_mode: GenerationMode) -> PlanResponse:
+    def _without_existing(
+        concepts: list[Concept],
+        dependencies: list[Dependency],
+        existing_concepts: list[str],
+    ) -> tuple[list[Concept], list[Dependency]]:
+        existing = {name.casefold().strip() for name in existing_concepts}
+        kept = [concept for concept in concepts if concept.name.casefold().strip() not in existing]
+        kept_ids = {concept.id for concept in kept}
+        filtered_dependencies = [
+            Dependency(
+                concept_id=dependency.concept_id,
+                prerequisites=[item for item in dependency.prerequisites if item in kept_ids],
+            )
+            for dependency in dependencies
+            if dependency.concept_id in kept_ids
+        ]
+        return kept, filtered_dependencies
+
+    @staticmethod
+    def _lines(
+        title: str,
+        concepts: list[Concept],
+        proposed: list[LearningLine] | None = None,
+    ) -> list[LearningLine]:
+        concept_ids = {concept.id for concept in concepts}
+        assigned: set[str] = set()
+        line_ids: set[str] = set()
+        lines: list[LearningLine] = []
+        for line in proposed or []:
+            members = [concept_id for concept_id in line.concept_ids if concept_id in concept_ids and concept_id not in assigned]
+            if not members or line.id in line_ids:
+                continue
+            lines.append(line.model_copy(update={"concept_ids": members}))
+            assigned.update(members)
+            line_ids.add(line.id)
+
+        subject = " ".join(title.split())[:48]
+        labels = {
+            ConceptCategory.FOUNDATION: ("groundwork", f"{subject} Groundwork", "Language and ideas that support the rest of this route."),
+            ConceptCategory.CORE: ("workshop", f"{subject} Workshop", "The central mechanisms and working knowledge of the subject."),
+            ConceptCategory.ADVANCED: ("deep_track", f"{subject} Deep Track", "Deeper connections to reach confident understanding."),
+            ConceptCategory.APPLICATION: ("field_line", f"{subject} Field Line", "Practice that turns understanding into usable skill."),
+        }
+        for category, (suffix, name, description) in labels.items():
+            members = [concept.id for concept in concepts if concept.id not in assigned and concept.category is category]
+            if members:
+                line_id = suffix if suffix not in line_ids else f"{category.value}_{suffix}"
+                lines.append(LearningLine(id=line_id, name=name, description=description, concept_ids=members))
+        return lines
+
+    @classmethod
+    def _plan(
+        cls,
+        title: str,
+        graph: GraphResult,
+        preferences: StudyPreferences,
+        generation_mode: GenerationMode,
+        lines: list[LearningLine] | None = None,
+    ) -> PlanResponse:
         schedule, statistics = create_schedule(graph.concepts, preferences)
         return PlanResponse(
             id=str(uuid4()),
@@ -127,6 +226,39 @@ class PlanService:
             generation_mode=generation_mode,
             concepts=graph.concepts,
             edges=graph.edges,
+            lines=cls._lines(title, graph.concepts, lines),
             schedule=schedule,
             statistics=statistics,
+        )
+
+    @classmethod
+    def _expansion(
+        cls,
+        request: ExpandLineRequest,
+        graph: GraphResult,
+        generation_mode: GenerationMode,
+        lines: list[LearningLine] | None = None,
+    ) -> LineExpansionResponse:
+        schedule, _ = create_schedule(graph.concepts, request.preferences)
+        sources = {edge.from_concept for edge in graph.edges}
+        return LineExpansionResponse(
+            destination=request.destination,
+            generation_mode=generation_mode,
+            concepts=graph.concepts,
+            edges=graph.edges,
+            lines=cls._lines(request.destination, graph.concepts, lines),
+            connector_concept_ids=[concept.id for concept in graph.concepts if concept.id not in sources],
+            schedule=schedule,
+        )
+
+    @staticmethod
+    def _empty_expansion(destination: str, generation_mode: GenerationMode) -> LineExpansionResponse:
+        return LineExpansionResponse(
+            destination=destination,
+            generation_mode=generation_mode,
+            concepts=[],
+            edges=[],
+            lines=[],
+            connector_concept_ids=[],
+            schedule=[],
         )
