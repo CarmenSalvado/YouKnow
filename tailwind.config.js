@@ -11,7 +11,7 @@ export default {
         cobalt: '#1769ff',
       },
       fontFamily: {
-        sans: ['Manrope', 'Avenir Next', 'Segoe UI', 'sans-serif'],
+        sans: ['Loficore', 'Pixelify Sans', 'sans-serif'],
       },
     },
   },

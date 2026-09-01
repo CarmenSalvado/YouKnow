@@ -55,6 +55,8 @@ try {
   await clickText('Open planner')
   await eventually(`document.querySelector('[aria-current="page"]')?.textContent.includes('Learning Map')`, 'The dashboard did not open.')
   if (!await run(`document.querySelector('[aria-label="Learning source content"]')?.value === '' && !!document.querySelector('.empty-map')`)) throw new Error('The app did not open in the empty Explorer account.')
+  await clickText('Add a source to begin')
+  if (!await run(`document.activeElement?.getAttribute('aria-label') === 'Learning source content'`)) throw new Error('Add source did not focus the source field.')
   if (!await run(`document.querySelector('[aria-label="AI provider"]') && document.querySelector('[aria-label="AI API key"]')?.type === 'password' && !localStorage.getItem('llm-api-key')`)) throw new Error('The AI credentials control is missing or persisted insecurely.')
   await clickText('Alex Morgan')
   await eventually(`document.querySelector('[aria-label="Learning source content"]')?.value === 'Quantum Computing' && document.querySelectorAll('.metro-station').length > 12`, 'The Quantum route is not preloaded.')
