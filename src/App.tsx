@@ -12,26 +12,47 @@ import {
   Map,
   Pause,
   Play,
-  Save,
+  Plus,
   Send,
   Settings,
   Sparkles,
   Target,
+  Trash2,
   WandSparkles,
   X,
 } from 'lucide-react'
 import Brand from './Brand'
 import LandingPage from './LandingPage'
 import LearningMap from './LearningMap'
+import MapsGallery from './MapsGallery'
 import { navigation, stations } from './mockData'
 
 const navIcons = [Map, CalendarDays, Library, BarChart3, Sparkles, Settings]
 
 type SourceType = 'topic' | 'text' | 'youtube' | 'pdf'
 type AIProvider = 'openai' | 'qwen' | 'groq' | 'gemini' | 'openrouter'
-type AccountId = 'quantum' | 'explorer'
+type AccountId = string
+type Profile = { id: AccountId; name: string; initials: string; detail: string; starterTopic: string; streak: number; streakWeek: number[] }
 type ColorTheme = 'pink' | 'blue'
+type NodeLabelStyle = 'smart' | 'metro'
 const themeKey = 'youknow-color-theme'
+const backgroundKey = 'youknow-background-color'
+const nodeLabelStyleKey = 'youknow-node-label-style'
+const themeBackground = { pink: '#ff4f88', blue: '#2596be' } as const
+const defaultModel: Record<AIProvider, string> = {
+  openai: 'gpt-5-mini',
+  qwen: 'qwen-plus',
+  groq: 'openai/gpt-oss-20b',
+  gemini: 'gemini-3.7-flash',
+  openrouter: 'openrouter/free',
+}
+const suggestedModels: Record<AIProvider, readonly string[]> = {
+  openai: ['gpt-5-mini'],
+  qwen: ['qwen-plus', 'qwen-flash', 'qwen3-coder-plus'],
+  groq: ['openai/gpt-oss-20b'],
+  gemini: ['gemini-3.7-flash'],
+  openrouter: ['openrouter/free'],
+}
 type Preferences = { sourceType: SourceType; topic: string; minutes: number; targetDate: string }
 type LessonState = 'ready' | 'active' | 'completed' | 'reviewing'
 type Notice = { kind: 'success' | 'error'; text: string }
@@ -41,6 +62,7 @@ type PlanLine = { id: string; name: string; description: string; concept_ids: st
 type Plan = {
   id: string
   title: string
+  goal_concept_id?: string
   generation_mode?: 'ai' | 'curated' | 'structural'
   concepts: PlanConcept[]
   edges: { from: string; to: string }[]
@@ -48,7 +70,7 @@ type Plan = {
   schedule: StudySession[]
   statistics: { concept_count: number; total_minutes: number; total_sessions: number; estimated_completion_date: string }
 }
-type SourceCard = { id: string; label: string; kind: SourceType; addedAt: string }
+type SourceCard = { id: string; conceptId?: string; label: string; kind: SourceType; addedAt: string }
 type LineExpansion = {
   destination: string
   generation_mode: 'ai' | 'structural'
@@ -61,23 +83,24 @@ type LineExpansion = {
 
 const planKey = 'metro-plan'
 const completedKey = 'metro-completed-sessions'
+const knownKey = 'metro-known-concepts'
 const preferencesKey = 'metro-preferences'
 const notesKey = 'metro-notes'
 const sourcesKey = 'metro-sources'
-const accounts = {
-  quantum: { name: 'Alex Morgan', initials: 'AM', detail: 'Quantum route' },
-  explorer: { name: 'Maya Chen', initials: 'MC', detail: 'Empty route' },
-} as const
+const profilesKey = 'metro-profiles'
+const removedProfileId = 'explorer'
+const defaultProfiles: Profile[] = [
+  { id: 'quantum', name: 'Alex Morgan', initials: 'AM', detail: 'Quantum route', starterTopic: 'Quantum Computing', streak: 12, streakWeek: [1, 1, 1, 1, 1, 0, 0] },
+]
 const accountKey = (key: string, account: AccountId) => `${key}:${account}`
 const sessionKey = (session: StudySession) => `${session.date}:${session.concept_id}`
 
-const defaultPreferences = (account: AccountId): Preferences => ({
+const defaultPreferences = (account: AccountId, profiles = defaultProfiles): Preferences => ({
   sourceType: 'topic',
-  topic: account === 'quantum' ? 'Quantum Computing' : '',
+  topic: profiles.find(profile => profile.id === account)?.starterTopic ?? '',
   minutes: 30,
   targetDate: '',
 })
-
 function readStored<T>(key: string, fallback: T): T {
   try {
     const stored = localStorage.getItem(key)
@@ -130,8 +153,18 @@ function LessonTimer({ active, minutes }: { active: boolean; minutes: number }) 
   return <div role="timer" aria-label="Lesson time remaining" className="lesson-timer mt-4"><Clock3 size={15} /><div><time>{time}</time><span>{paused ? 'paused' : 'remaining'}</span></div><button type="button" aria-label={paused ? 'Resume timer' : 'Pause timer'} aria-pressed={paused} onClick={() => setPaused(value => !value)}>{paused ? <Play size={13} fill="currentColor" /> : <Pause size={13} fill="currentColor" />}{paused ? 'Resume' : 'Pause'}</button></div>
 }
 
-function Sidebar({ active, account, onAccountChange, onNavigate }: { active: string; account: AccountId; onAccountChange: (account: AccountId) => void; onNavigate: (item: string) => void }) {
-  const profile = accounts[account]
+function Sidebar({ active, account, profiles, onAccountChange, onCreateProfile, onDeleteProfile, onNavigate }: { active: string; account: AccountId; profiles: Profile[]; onAccountChange: (account: AccountId) => void; onCreateProfile: (name: string) => void; onDeleteProfile: (profile: Profile) => void; onNavigate: (item: string) => void }) {
+  const profile = profiles.find(item => item.id === account) ?? profiles[0]
+  const [creatingProfile, setCreatingProfile] = useState(false)
+  const [profileName, setProfileName] = useState('')
+  const createProfile = (event: FormEvent) => {
+    event.preventDefault()
+    const name = profileName.trim()
+    if (!name) return
+    onCreateProfile(name)
+    setProfileName('')
+    setCreatingProfile(false)
+  }
   return (
     <aside className="sidebar flex min-h-0 flex-col border-r border-[#213044] bg-[#06111f]">
       <Brand />
@@ -157,15 +190,16 @@ function Sidebar({ active, account, onAccountChange, onNavigate }: { active: str
       <div className="streak-card mx-4 mb-3 rounded-[10px] border border-[#263548] bg-[#091523] p-4">
         <div className="flex items-center gap-3">
           <Flame className="text-[#f5f8fc]" size={25} />
-          <div><div className="text-[17px] font-semibold text-white">{account === 'quantum' ? 12 : 0}</div><div className="text-[11px] text-muted">Day streak</div></div>
+          <div><div className="text-[17px] font-semibold text-white">{profile.streak}</div><div className="text-[11px] text-muted">Day streak</div></div>
         </div>
         <div className="mt-4 flex gap-1.5">
-          {(account === 'quantum' ? [1, 1, 1, 1, 1, 0, 0] : [0, 0, 0, 0, 0, 0, 0]).map((filled, index) => <span key={index} className={`h-1.5 flex-1 rounded-sm ${filled ? 'bg-cobalt' : 'bg-[#23334a]'}`} />)}
+          {profile.streakWeek.map((filled, index) => <span key={index} className={`h-1.5 flex-1 rounded-sm ${filled ? 'bg-cobalt' : 'bg-[#23334a]'}`} />)}
         </div>
       </div>
 
       <div className="account-switcher mx-4 mb-3" role="group" aria-label="Learning profiles">
-        {(Object.keys(accounts) as AccountId[]).map(id => <button type="button" key={id} aria-pressed={account === id} onClick={() => onAccountChange(id)}><span>{accounts[id].initials}</span><span><strong>{accounts[id].name}</strong><small>{accounts[id].detail}</small></span>{account === id && <Check size={13} />}</button>)}
+        {profiles.map(item => <div className="profile-row" key={item.id}><button type="button" aria-pressed={account === item.id} onClick={() => onAccountChange(item.id)}><span>{item.initials}</span><span><strong>{item.name}</strong><small>{item.detail}</small></span>{account === item.id && <Check size={13} />}</button>{!defaultProfiles.some(profile => profile.id === item.id) && <button type="button" className="delete-profile-button" aria-label={`Delete ${item.name} profile`} title="Delete profile" onClick={() => onDeleteProfile(item)}><Trash2 size={13} /></button>}</div>)}
+        <button type="button" className="new-profile-button" aria-expanded={creatingProfile} onClick={() => setCreatingProfile(true)}><span><Plus size={13} /></span><span><strong>New profile</strong><small>Create a separate route</small></span></button>
       </div>
 
       <button type="button" onClick={() => onNavigate('Settings')} className="user-card mx-4 mb-4 flex items-center gap-3 border-t border-[#1c2b3e] pt-4 text-left">
@@ -173,6 +207,7 @@ function Sidebar({ active, account, onAccountChange, onNavigate }: { active: str
         <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-[#e7edf5]">{profile.name}</span><span className="block text-[10px] text-muted">{profile.detail}</span></span>
         <ChevronRight size={14} className="text-muted" />
       </button>
+      {creatingProfile && <div className="profile-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setCreatingProfile(false) }}><section className="profile-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-dialog-title" onKeyDown={event => { if (event.key === 'Escape') setCreatingProfile(false) }}><header><span>PROFILE / NEW</span><button type="button" aria-label="Close profile creator" onClick={() => setCreatingProfile(false)}><X size={16} /></button></header><form onSubmit={createProfile}><p className="section-label">Your own line</p><h2 id="profile-dialog-title">Create a learning profile.</h2><label><span>Name</span><input autoFocus aria-label="Profile name" value={profileName} onChange={event => setProfileName(event.target.value)} placeholder="e.g. Sam Rivera" maxLength={40} required /></label><button type="submit"><Plus size={15} /> Create profile</button></form></section></div>}
     </aside>
   )
 }
@@ -213,14 +248,16 @@ function Control({ label, children, wide }: { label: string; children: React.Rea
   return <label className={`control block ${wide ? 'topic-control' : ''}`}><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">{label}</span>{children}</label>
 }
 
-function TopControls({ preferences, sourceFile, provider, apiKey, onChange, onFileChange, onProviderChange, onApiKeyChange, onGenerate, generating }: {
+function TopControls({ preferences, sourceFile, provider, model, apiKey, onChange, onFileChange, onProviderChange, onModelChange, onApiKeyChange, onGenerate, generating }: {
   preferences: Preferences
   sourceFile: File | null
   provider: AIProvider
+  model: string
   apiKey: string
   onChange: (preferences: Preferences) => void
   onFileChange: (file: File | null) => void
   onProviderChange: (provider: AIProvider) => void
+  onModelChange: (model: string) => void
   onApiKeyChange: (apiKey: string) => void
   onGenerate: () => void
   generating: boolean
@@ -232,7 +269,7 @@ function TopControls({ preferences, sourceFile, provider, apiKey, onChange, onFi
     <form className="top-controls flex h-[78px] items-center gap-4" onSubmit={event => { event.preventDefault(); if (hasSource && !generating) onGenerate() }}>
       <Control label="Learn from"><select aria-label="Learning source" className="control-field" value={preferences.sourceType} onChange={event => { onFileChange(null); onChange({ ...preferences, sourceType: event.target.value as SourceType, topic: '' }) }}><option value="topic">A topic</option><option value="text">Pasted text</option><option value="youtube">YouTube</option><option value="pdf">A PDF</option></select></Control>
       <Control label={labels[preferences.sourceType]} wide>{preferences.sourceType === 'pdf' ? <input key={preferences.sourceType} aria-label="PDF source" className="control-field file-field" type="file" accept="application/pdf,.pdf" onChange={event => onFileChange(event.target.files?.[0] ?? null)} /> : <input aria-label="Learning source content" className="control-field" value={preferences.topic} placeholder={placeholders[preferences.sourceType]} onChange={event => onChange({ ...preferences, topic: event.target.value })} />}</Control>
-      <div className="control ai-credentials"><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">AI provider / API key{apiKey && <i>ready</i>}</span><div><select aria-label="AI provider" value={provider} onChange={event => onProviderChange(event.target.value as AIProvider)}><option value="openai">OpenAI</option><option value="qwen">Qwen</option><option value="groq">Groq</option><option value="gemini">Gemini</option><option value="openrouter">OpenRouter</option></select><input aria-label="AI API key" type="password" value={apiKey} autoComplete="off" spellCheck={false} placeholder="API key · not saved" title="Used only for this tab and sent to your backend." onChange={event => onApiKeyChange(event.target.value)} /></div></div>
+      <div className="control ai-credentials"><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">AI provider / model / API key{apiKey && <i>ready</i>}</span><div><select aria-label="AI provider" value={provider} onChange={event => onProviderChange(event.target.value as AIProvider)}><option value="openai">OpenAI</option><option value="qwen">Qwen</option><option value="groq">Groq</option><option value="gemini">Gemini</option><option value="openrouter">OpenRouter</option></select><input aria-label="AI model" value={model} list="ai-models" spellCheck={false} title="Model ID sent to the selected provider." onChange={event => onModelChange(event.target.value)} /><datalist id="ai-models">{suggestedModels[provider].map(candidate => <option key={candidate} value={candidate} />)}</datalist><input aria-label="AI API key" type="password" value={apiKey} autoComplete="off" spellCheck={false} placeholder="API key · not saved" title="Used only for this tab and sent to your backend." onChange={event => onApiKeyChange(event.target.value)} /></div></div>
       <div className="ml-auto flex items-end gap-3">
         <Control label="Time per day">
           <select className="control-field" value={preferences.minutes} onChange={event => onChange({ ...preferences, minutes: Number(event.target.value) })}>
@@ -248,26 +285,26 @@ function TopControls({ preferences, sourceFile, provider, apiKey, onChange, onFi
   )
 }
 
-function StudyOverview({ preferences, plan, currentConcept, currentSession, lessonState, progress, onLessonAction, onViewPlan }: {
+function StudyOverview({ preferences, plan, currentConcept, currentSession, lessonState, progress, empty = false, onLessonAction, onViewPlan }: {
   preferences: Preferences
   plan: Plan | null
   currentConcept: PlanConcept | null
   currentSession: StudySession | null
   lessonState: LessonState
   progress: number
+  empty?: boolean
   onLessonAction: () => void
   onViewPlan: () => void
 }) {
-  if (!plan && !preferences.topic) return <aside className="study-overview empty-overview overflow-hidden rounded-[10px] border border-line bg-panel"><section><span className="empty-platform">PLATFORM 00</span><CircleDot size={34} /><h2>No route on this account</h2><p>Choose a subject above. YouKnow will turn it into the concepts, dependencies, and sessions you need.</p></section></aside>
   const completed = lessonState === 'completed'
   const lessonLabel = lessonState === 'ready' ? 'Start Lesson' : lessonState === 'active' ? 'Complete Lesson' : lessonState === 'reviewing' ? 'Finish Review' : 'Review Lesson'
   const routeTitle = (plan?.title ?? preferences.topic) || 'Your learning route'
-  const totalMinutes = plan?.statistics.total_minutes ?? stations.length * preferences.minutes
+  const totalMinutes = plan?.statistics.total_minutes ?? (empty ? 0 : stations.length * preferences.minutes)
   const dailyMinutes = plan?.schedule.reduce((days, session) => {
     days[new Date(`${session.date}T00:00:00Z`).getUTCDay()] += session.duration_minutes
     return days
   }, [0, 0, 0, 0, 0, 0, 0]) ?? [0, 0, 0, 0, 0, 0, 0]
-  if (!plan) dailyMinutes[new Date().getDay()] = preferences.minutes
+  if (!plan && !empty) dailyMinutes[new Date().getDay()] = preferences.minutes
   const busiestDay = Math.max(...dailyMinutes, 1)
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   return (
@@ -276,10 +313,10 @@ function StudyOverview({ preferences, plan, currentConcept, currentSession, less
         <div className="flex items-center justify-between"><p className="section-label text-[#dfe5ed]">Today's lesson</p><button type="button" onClick={onViewPlan} className="plan-link text-[10px] text-[#4d8fff] underline underline-offset-2">View Plan</button></div>
         <div className="mt-5 flex items-center gap-3">
           <div className={`lesson-icon grid h-12 w-12 shrink-0 place-items-center rounded-full border text-white ${completed ? 'border-[#35b879] bg-[#18855a]' : 'border-[#2a70e5] bg-[#1252c8]'}`}><CircleDot size={21} /></div>
-          <div><p className="text-[13px] font-semibold text-[#f3f6fa]">{currentConcept?.name ?? 'Quantum Algorithms'}</p><p className="mt-1 text-[11px] text-muted">{currentConcept?.description ?? 'Entanglement & Superposition'}</p><p className="mt-1 text-[11px] text-muted">{currentSession?.duration_minutes ?? preferences.minutes} min</p></div>
+          <div><p className="text-[13px] font-semibold text-[#f3f6fa]">{currentConcept?.name ?? (empty ? 'No lesson yet' : 'Quantum Algorithms')}</p><p className="mt-1 text-[11px] text-muted">{currentConcept?.description ?? (empty ? 'Create a route to schedule your first lesson.' : 'Entanglement & Superposition')}</p>{!empty && <p className="mt-1 text-[11px] text-muted">{currentSession?.duration_minutes ?? preferences.minutes} min</p>}</div>
         </div>
         <LessonTimer key={currentSession ? sessionKey(currentSession) : currentConcept?.id} active={lessonState === 'active' || lessonState === 'reviewing'} minutes={currentSession?.duration_minutes ?? preferences.minutes} />
-        <button type="button" onClick={onLessonAction} className="lesson-button mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[6px] bg-[#175edc] text-[11px] font-semibold text-white">
+        <button type="button" disabled={empty} onClick={onLessonAction} className="lesson-button mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-[6px] bg-[#175edc] text-[11px] font-semibold text-white">
           {lessonLabel} {lessonState === 'active' || lessonState === 'reviewing' ? <Check size={13} /> : <Play size={13} fill="currentColor" />}
         </button>
       </section>
@@ -356,60 +393,53 @@ function CoachView({ plan, currentConcept }: { plan: Plan | null; currentConcept
   )
 }
 
-function SettingsView({ theme, onThemeChange, onSaved }: { theme: ColorTheme; onThemeChange: (theme: ColorTheme) => void; onSaved: () => void }) {
-  const [dailyReminder, setDailyReminder] = useState(() => localStorage.getItem('metro-daily-reminder') !== 'false')
-  const [weeklySummary, setWeeklySummary] = useState(() => localStorage.getItem('metro-weekly-summary') !== 'false')
-  const save = (event: FormEvent) => {
-    event.preventDefault()
-    localStorage.setItem('metro-daily-reminder', String(dailyReminder))
-    localStorage.setItem('metro-weekly-summary', String(weeklySummary))
-    onSaved()
-  }
+function SettingsView({ theme, background, nodeLabelStyle, onThemeChange, onBackgroundChange, onNodeLabelStyleChange }: { theme: ColorTheme; background: string; nodeLabelStyle: NodeLabelStyle; onThemeChange: (theme: ColorTheme) => void; onBackgroundChange: (background: string) => void; onNodeLabelStyleChange: (style: NodeLabelStyle) => void }) {
   return (
-    <section className="workspace-card settings-card"><p className="section-label">Settings</p><h1>Learning preferences</h1><form onSubmit={save}><fieldset className="theme-picker"><legend>Color theme</legend><div>{([['pink', 'Pink', '#ff4f88'], ['blue', 'Blue', '#2596be']] as const).map(([value, label, color]) => <button type="button" key={value} aria-pressed={theme === value} onClick={() => onThemeChange(value)}><i style={{ background: color }} /><span><strong>{label}</strong><small>{color.toUpperCase()}</small></span><Check size={15} /></button>)}</div></fieldset><label><span><strong>Daily reminder</strong><small>Get a reminder before your planned session.</small></span><input type="checkbox" checked={dailyReminder} onChange={event => setDailyReminder(event.target.checked)} /></label><label><span><strong>Weekly summary</strong><small>Receive a progress recap at the end of each week.</small></span><input type="checkbox" checked={weeklySummary} onChange={event => setWeeklySummary(event.target.checked)} /></label><button type="submit"><Save size={15} /> Save Settings</button></form></section>
+    <section className="workspace-card settings-card"><p className="section-label">Settings</p><h1>Customization</h1><div className="settings-options"><fieldset className="theme-picker"><legend>Color theme</legend><div>{([['pink', 'Pink', '#ff4f88'], ['blue', 'Blue', '#2596be']] as const).map(([value, label, color]) => <button type="button" key={value} aria-pressed={theme === value} onClick={() => onThemeChange(value)}><i style={{ background: color }} /><span><strong>{label}</strong><small>{color.toUpperCase()}</small></span><Check size={15} /></button>)}</div></fieldset><fieldset className="theme-picker label-style-picker"><legend>Node titles</legend><div>{([['smart', 'Smart labels', 'Collision-free cards'], ['metro', 'Metro labels', 'Outlined map text']] as const).map(([value, label, detail]) => <button type="button" key={value} aria-pressed={nodeLabelStyle === value} onClick={() => onNodeLabelStyleChange(value)}><i className={`label-style-icon ${value}`}>Aa</i><span><strong>{label}</strong><small>{detail}</small></span><Check size={15} /></button>)}</div></fieldset><label className="background-picker"><span><strong>Background</strong><small>Color behind the dashboard elements.</small></span><input type="color" aria-label="Dashboard background" value={background} onChange={event => onBackgroundChange(event.target.value)} /></label></div></section>
   )
 }
 
-function NotebookShelf({ concepts, notes, sources, activeConceptId, onSelectConcept, onSaveNote, onAddSource }: {
-  concepts: PlanConcept[]
-  notes: Record<string, string>
+function NodeNotebook({ concept, note, sources, onClose, onOpenMap, onSaveNote, onAddSource, onRemoveSource }: {
+  concept: PlanConcept
+  note: string
   sources: SourceCard[]
-  activeConceptId?: string
-  onSelectConcept: (conceptId: string) => void
-  onSaveNote: (conceptId: string, content: string) => void
+  onClose: () => void
+  onOpenMap: () => void
+  onSaveNote: (content: string) => void
   onAddSource: (label: string) => void
+  onRemoveSource: (sourceId: string) => void
 }) {
-  const selected = concepts.find(concept => concept.id === activeConceptId) ?? concepts[0]
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(note)
   const [sourceDraft, setSourceDraft] = useState('')
-  useEffect(() => setDraft(selected ? notes[selected.id] ?? '' : ''), [selected?.id, notes])
-  return <section className="notebook-shelf" aria-label="Learning notebooks">
-    <header><div><p className="section-label">Field notes</p><h2>Keep the useful bits.</h2><p>Every node gets its own page. Sources stay pinned beside it.</p></div><span className="notebook-count"><BookOpen size={15} />{Object.values(notes).filter(Boolean).length} notes · {sources.length} sources</span></header>
+  useEffect(() => setDraft(note), [concept.id, note])
+  return <section className="notebook-shelf node-notebook" aria-label={`Notes and sources for ${concept.name}`}>
+    <header><div><p className="section-label">Node workspace</p><h2>{concept.name}</h2><p>Your notes and sources stay attached to this node.</p></div><div className="node-notebook-actions"><span className="notebook-count"><BookOpen size={15} />{note.trim() ? '1 note' : 'No notes'} · {sources.length} {sources.length === 1 ? 'source' : 'sources'}</span><button type="button" onClick={onOpenMap}><Map size={14} />See on map</button><button type="button" aria-label="Close node workspace" onClick={onClose}><X size={15} /></button></div></header>
     <div className="notebook-grid">
       <article className="big-notebook">
         <div className="notebook-spine" aria-hidden="true"><i /><i /><i /><i /><i /></div>
         <div className="notebook-paper">
-          <div className="notebook-paper-head"><span>NOTEBOOK 01</span><strong>{selected?.name ?? 'Choose a station'}</strong></div>
-          {concepts.length > 0 && <div className="notebook-tabs" role="listbox" aria-label="Choose a notebook page">{concepts.map(concept => <button type="button" role="option" aria-selected={selected?.id === concept.id} key={concept.id} onClick={() => onSelectConcept(concept.id)}>{concept.name}</button>)}</div>}
-          <textarea aria-label="Notes for selected lesson" value={draft} onChange={event => setDraft(event.target.value)} placeholder={selected ? 'Write the idea you want to remember…' : 'Open a station from the map to start writing.'} disabled={!selected} />
-          <footer><span>{draft.trim() ? 'Draft ready' : 'Blank page'}</span><button type="button" onClick={() => selected && onSaveNote(selected.id, draft)} disabled={!selected}>Save page</button></footer>
+          <div className="notebook-paper-head"><span>NODE NOTES</span><strong>{concept.name}</strong></div>
+          <textarea autoFocus aria-label="Notes for selected lesson" value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') onSaveNote(draft) }} placeholder="Write the idea you want to remember…" />
+          <footer><span>{draft === note ? (draft.trim() ? 'Saved' : 'Blank page') : 'Unsaved changes · ⌘ Enter'}</span><button type="button" onClick={() => onSaveNote(draft)} disabled={draft === note}>Save page</button></footer>
         </div>
       </article>
       <article className="source-notebook">
         <div className="postit-header"><span>PINBOARD</span><strong>Sources used</strong></div>
         <form onSubmit={event => { event.preventDefault(); if (!sourceDraft.trim()) return; onAddSource(sourceDraft.trim()); setSourceDraft('') }}><input aria-label="Source to save" value={sourceDraft} onChange={event => setSourceDraft(event.target.value)} placeholder="Paste a link, book, or file" /><button type="submit">Pin it</button></form>
-        <div className="postit-list">{sources.length ? sources.map((source, index) => <div className="source-postit" key={source.id} style={{ '--postit-tilt': `${index % 2 ? 1 : -1}deg` } as CSSProperties}><span>{source.kind}</span><p>{source.label}</p></div>) : <p className="source-empty">No sources pinned yet. Add the material you used to build this route.</p>}</div>
+        <div className="postit-list">{sources.length ? sources.map((source, index) => <div className="source-postit" key={source.id} style={{ '--postit-tilt': `${index % 2 ? 1 : -1}deg` } as CSSProperties}><span>{source.kind}</span><p>{source.label}</p><button type="button" aria-label={`Remove ${source.label}`} onClick={() => onRemoveSource(source.id)}><X size={12} /></button></div>) : <p className="source-empty">No sources pinned to this node yet.</p>}</div>
       </article>
     </div>
   </section>
 }
 
-function WorkspaceView({ active, theme, presetAccount, preferences, plan, currentConcept, currentSession, completedSessions, lessonState, progress, notes, sources, notebookConceptId, onLessonAction, onViewPlan, onOpenConcept, onStartSession, onNavigate, onThemeChange, onNotice, onSelectNotebookConcept, onSaveNote, onAddSource }: {
+function WorkspaceView({ active, theme, background, nodeLabelStyle, preferences, plan, starterRoute, currentConcept, currentSession, completedSessions, lessonState, progress, notes, sources, notebookConceptId, onLessonAction, onViewPlan, onOpenConcept, onStartSession, onNavigate, onThemeChange, onBackgroundChange, onNodeLabelStyleChange, onNotice, onSelectNotebookConcept, onSaveNote, onAddSource, onRemoveSource }: {
   active: string
   theme: ColorTheme
-  presetAccount: boolean
+  background: string
+  nodeLabelStyle: NodeLabelStyle
   preferences: Preferences
   plan: Plan | null
+  starterRoute: boolean
   currentConcept: PlanConcept | null
   currentSession: StudySession | null
   completedSessions: string[]
@@ -424,15 +454,23 @@ function WorkspaceView({ active, theme, presetAccount, preferences, plan, curren
   onStartSession: (session: StudySession) => void
   onNavigate: (item: string) => void
   onThemeChange: (theme: ColorTheme) => void
+  onBackgroundChange: (background: string) => void
+  onNodeLabelStyleChange: (style: NodeLabelStyle) => void
   onNotice: (notice: Notice) => void
-  onSelectNotebookConcept: (conceptId: string) => void
+  onSelectNotebookConcept: (conceptId?: string) => void
   onSaveNote: (conceptId: string, content: string) => void
-  onAddSource: (label: string) => void
+  onAddSource: (conceptId: string, label: string) => void
+  onRemoveSource: (sourceId: string) => void
 }) {
   const upcoming = plan?.schedule.filter(session => !completedSessions.includes(sessionKey(session))).slice(0, 8)
-  const concepts = plan?.concepts ?? (presetAccount ? stations.map(presetConcept) : [])
+  const concepts = plan?.concepts ?? (starterRoute ? stations.map(presetConcept) : [])
+  useEffect(() => {
+    if (active !== 'Library' || !notebookConceptId) return
+    const frame = requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[data-library-concept-id]')].find(element => element.dataset.libraryConceptId === notebookConceptId)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    return () => cancelAnimationFrame(frame)
+  }, [active, notebookConceptId])
 
-  if (active === 'Study Plan') return <div className="workspace-view study-plan-view"><section className="workspace-card session-card"><p className="section-label">Upcoming sessions</p><h1>Your next stops</h1><p className="workspace-copy">Choose any stop to start that lesson.</p><div className="session-list">{(upcoming ?? concepts.slice(15, 21).map(concept => ({ date: '', concept_id: concept.id, duration_minutes: preferences.minutes }))).map((session, index) => <button type="button" onClick={() => onStartSession(session)} key={`${session.date}-${session.concept_id}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><strong>{concepts.find(concept => concept.id === session.concept_id)?.name}</strong><small>{session.date ? `${formatDate(session.date)} · ` : ''}{session.duration_minutes} min <Play size={10} /></small></button>)}</div>{upcoming?.length === 0 && <p className="workspace-copy">All scheduled sessions are complete.</p>}</section><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div>
+  if (active === 'Study Plan') return <div className="workspace-view study-plan-view"><section className="workspace-card session-card"><p className="section-label">Upcoming sessions</p><h1>Your next stops</h1><p className="workspace-copy">Choose any stop to start that lesson.</p><div className="session-list">{(upcoming ?? concepts.slice(15, 21).map(concept => ({ date: '', concept_id: concept.id, duration_minutes: preferences.minutes }))).map((session, index) => <button type="button" onClick={() => onStartSession(session)} key={`${session.date}-${session.concept_id}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><strong>{concepts.find(concept => concept.id === session.concept_id)?.name}</strong><small>{session.date ? `${formatDate(session.date)} · ` : ''}{session.duration_minutes} min <Play size={10} /></small></button>)}</div>{(upcoming?.length ?? concepts.length) === 0 && <p className="workspace-copy">Create a learning route to schedule your first session.</p>}</section><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div>
 
   if (active === 'Library') {
     const stages = [
@@ -444,11 +482,11 @@ function WorkspaceView({ active, theme, presetAccount, preferences, plan, curren
     const featured = currentConcept ?? concepts[0]
     const totalMinutes = concepts.reduce((sum, concept) => sum + concept.estimated_minutes, 0)
 
-    if (!featured) return <section className="workspace-card library-view library-empty"><Library size={34} /><p className="section-label">Concept library</p><h1>Your library starts with a route.</h1><p className="workspace-copy">Create a learning map and every concept will be organized here automatically.</p><button type="button" onClick={() => onNavigate('Learning Map')}>Build my route <ChevronRight size={15} /></button><NotebookShelf concepts={concepts} notes={notes} sources={sources} activeConceptId={notebookConceptId} onSelectConcept={onSelectNotebookConcept} onSaveNote={onSaveNote} onAddSource={onAddSource} /></section>
+    if (!featured) return <section className="workspace-card library-view library-empty"><Library size={34} /><p className="section-label">Concept library</p><h1>Your library starts with a route.</h1><p className="workspace-copy">Create a learning map and every concept will get its own notes and sources.</p><button type="button" onClick={() => onNavigate('Learning Map')}>Build my route <ChevronRight size={15} /></button></section>
 
     return <section className="workspace-card library-view">
       <header className="library-hero">
-        <div><p className="section-label">Concept library</p><h1>{plan?.title ?? preferences.topic}</h1><p>Explore the route by stage. Every card takes you directly to that concept on the map.</p></div>
+        <div><p className="section-label">Concept library</p><h1>{(plan?.title ?? preferences.topic) || 'Your learning route'}</h1><p>Open any node to write notes and pin the sources that belong to it.</p></div>
         <div className="library-summary" aria-label="Library summary"><span><strong>{concepts.length}</strong> concepts</span><span><strong>{formatMinutes(totalMinutes)}</strong> learning time</span></div>
       </header>
 
@@ -465,12 +503,18 @@ function WorkspaceView({ active, theme, presetAccount, preferences, plan, curren
             if (!stageConcepts.length) return null
             return <section className={`library-stage ${categoryRoute[stage.category]}`} key={stage.category}>
               <header><span>{stage.number}</span><div><h2>{stage.label}</h2><p>{stage.description}</p></div><strong>{stageConcepts.length}</strong></header>
-              <div className="concept-grid">{stageConcepts.map((concept, index) => <button type="button" onClick={() => onOpenConcept(concept)} key={concept.id} title={concept.description}><span className="concept-number">{String(index + 1).padStart(2, '0')}</span><div><strong>{concept.name}</strong><p>{concept.description}</p><small><i className={`route-dot ${categoryRoute[concept.category]}`} />{concept.estimated_minutes} min <ChevronRight size={11} /></small></div></button>)}</div>
+              <div className="concept-grid">{stageConcepts.map((concept, index) => {
+                const open = notebookConceptId === concept.id
+                const conceptSources = sources.filter(source => source.conceptId === concept.id || (!source.conceptId && concept.id === concepts[0]?.id))
+                return <article className={`concept-node ${open ? 'is-open' : ''}`} data-library-concept-id={concept.id} key={concept.id}>
+                  <button type="button" className="concept-card" aria-expanded={open} onClick={() => onSelectNotebookConcept(open ? undefined : concept.id)} title={concept.description}><span className="concept-number">{String(index + 1).padStart(2, '0')}</span><div><strong>{concept.name}</strong><p>{concept.description}</p><small><i className={`route-dot ${categoryRoute[concept.category]}`} />{concept.estimated_minutes} min <span>{notes[concept.id]?.trim() ? 'Note saved' : 'Open notes'}</span><ChevronRight size={11} /></small></div></button>
+                  {open && <NodeNotebook concept={concept} note={notes[concept.id] ?? ''} sources={conceptSources} onClose={() => onSelectNotebookConcept(undefined)} onOpenMap={() => onOpenConcept(concept)} onSaveNote={content => onSaveNote(concept.id, content)} onAddSource={label => onAddSource(concept.id, label)} onRemoveSource={onRemoveSource} />}
+                </article>
+              })}</div>
             </section>
           })}
         </div>
       </div>
-      <NotebookShelf concepts={concepts} notes={notes} sources={sources} activeConceptId={notebookConceptId ?? featured.id} onSelectConcept={onSelectNotebookConcept} onSaveNote={onSaveNote} onAddSource={onAddSource} />
     </section>
   }
 
@@ -522,18 +566,21 @@ function WorkspaceView({ active, theme, presetAccount, preferences, plan, curren
   }
 
   if (active === 'AI Coach') return <CoachView plan={plan} currentConcept={currentConcept} />
-  return <SettingsView theme={theme} onThemeChange={onThemeChange} onSaved={() => onNotice({ kind: 'success', text: 'Settings saved on this device.' })} />
+  return <SettingsView theme={theme} background={background} nodeLabelStyle={nodeLabelStyle} onThemeChange={onThemeChange} onBackgroundChange={onBackgroundChange} onNodeLabelStyleChange={onNodeLabelStyleChange} />
 }
 
-function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange: (theme: ColorTheme) => void }) {
-  const [account, setAccount] = useState<AccountId>('explorer')
+function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { theme: ColorTheme; background: string; onThemeChange: (theme: ColorTheme) => void; onBackgroundChange: (background: string) => void }) {
+  const [profiles, setProfiles] = useState<Profile[]>(() => readStored<Profile[]>(profilesKey, defaultProfiles).filter(profile => profile.id !== removedProfileId))
+  const [account, setAccount] = useState<AccountId>(defaultProfiles[0].id)
   const [activeNav, setActiveNav] = useState('Learning Map')
-  const [preferences, setPreferences] = useState<Preferences>(() => readStored(accountKey(preferencesKey, account), defaultPreferences(account)))
+  const [preferences, setPreferences] = useState<Preferences>(() => readStored(accountKey(preferencesKey, account), defaultPreferences(account, profiles)))
   const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [provider, setProvider] = useState<AIProvider>('openai')
+  const [model, setModel] = useState(defaultModel.openai)
   const [apiKey, setApiKey] = useState('')
   const [plan, setPlan] = useState<Plan | null>(() => readStored(accountKey(planKey, account), null))
   const [completedSessions, setCompletedSessions] = useState<string[]>(() => readStored(accountKey(completedKey, account), []))
+  const [knownConceptIds, setKnownConceptIds] = useState<string[]>(() => readStored(accountKey(knownKey, account), []))
   const [activeSession, setActiveSession] = useState<string | null>(null)
   const [focusedConceptId, setFocusedConceptId] = useState<string | undefined>()
   const [presetLessonState, setPresetLessonState] = useState<LessonState>('ready')
@@ -543,22 +590,36 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
   const [notes, setNotes] = useState<Record<string, string>>(() => readStored(accountKey(notesKey, account), {}))
   const [sources, setSources] = useState<SourceCard[]>(() => readStored(accountKey(sourcesKey, account), []))
   const [notebookConceptId, setNotebookConceptId] = useState<string | undefined>()
+  const [nodeLabelStyle, setNodeLabelStyle] = useState<NodeLabelStyle>(() => localStorage.getItem(nodeLabelStyleKey) === 'metro' ? 'metro' : 'smart')
+
+  useEffect(() => {
+    localStorage.setItem(profilesKey, JSON.stringify(profiles))
+    ;[planKey, completedKey, knownKey, preferencesKey, notesKey, sourcesKey].forEach(key => localStorage.removeItem(accountKey(key, removedProfileId)))
+  }, [])
+
+  const starterRoute = defaultProfiles.some(profile => profile.id === account)
   const currentSession = useMemo(() => plan?.schedule.find(session => sessionKey(session) === activeSession) ?? plan?.schedule.find(session => !completedSessions.includes(sessionKey(session))) ?? plan?.schedule[plan.schedule.length - 1] ?? null, [plan, completedSessions, activeSession])
-  const selectedPresetStation = account === 'quantum' ? stations.find(station => station.label === focusedConceptId) ?? stations.find(station => station.current) : undefined
+  const selectedPresetStation = starterRoute ? stations.find(station => station.label === focusedConceptId) ?? stations.find(station => station.current) : undefined
   const currentConcept = plan?.concepts.find(concept => concept.id === currentSession?.concept_id) ?? (selectedPresetStation ? presetConcept(selectedPresetStation) : null)
   const lessonState: LessonState = plan ? (!currentSession ? 'completed' : activeSession === sessionKey(currentSession) ? completedSessions.includes(activeSession) ? 'reviewing' : 'active' : completedSessions.includes(sessionKey(currentSession)) ? 'completed' : 'ready') : presetLessonState
-  const progress = plan ? plan.schedule.length ? Math.round(completedSessions.length / plan.schedule.length * 100) : 0 : account === 'quantum' && presetLessonState === 'completed' ? Math.round(100 / stations.length) : 0
+  const progress = plan ? plan.schedule.length ? Math.round(completedSessions.length / plan.schedule.length * 100) : 0 : presetLessonState === 'completed' ? Math.round(100 / stations.length) : 0
   const completedConceptIds = useMemo(() => plan?.concepts.filter(concept => {
     const sessions = plan.schedule.filter(session => session.concept_id === concept.id)
     return sessions.length > 0 && sessions.every(session => completedSessions.includes(sessionKey(session)))
   }).map(concept => concept.id) ?? [], [plan, completedSessions])
 
+  const changeNodeLabelStyle = (next: NodeLabelStyle) => {
+    setNodeLabelStyle(next)
+    localStorage.setItem(nodeLabelStyleKey, next)
+  }
+
   const switchAccount = (next: AccountId) => {
     if (next === account) return
     setAccount(next)
-    setPreferences(readStored(accountKey(preferencesKey, next), defaultPreferences(next)))
+    setPreferences(readStored(accountKey(preferencesKey, next), defaultPreferences(next, profiles)))
     setPlan(readStored(accountKey(planKey, next), null))
     setCompletedSessions(readStored(accountKey(completedKey, next), []))
+    setKnownConceptIds(readStored(accountKey(knownKey, next), []))
     setSourceFile(null)
     setActiveSession(null)
     setFocusedConceptId(undefined)
@@ -567,12 +628,49 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
     setSources(readStored(accountKey(sourcesKey, next), []))
     setNotebookConceptId(undefined)
     setActiveNav('Learning Map')
-    setNotice({ kind: 'success', text: next === 'quantum' ? 'Quantum route loaded.' : 'Empty Explorer account loaded. Choose a topic to begin.' })
+    setNotice({ kind: 'success', text: `${profiles.find(profile => profile.id === next)?.detail ?? 'Profile'} loaded.` })
+  }
+
+  const createProfile = (name: string) => {
+    const initials = name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()
+    const profile: Profile = { id: crypto.randomUUID(), name, initials, detail: 'New route', starterTopic: '', streak: 0, streakWeek: [0, 0, 0, 0, 0, 0, 0] }
+    const next = [...profiles, profile]
+    setProfiles(next)
+    localStorage.setItem(profilesKey, JSON.stringify(next))
+    setAccount(profile.id)
+    setPreferences(defaultPreferences(profile.id, next))
+    setPlan(null)
+    setCompletedSessions([])
+    setKnownConceptIds([])
+    setNotes({})
+    setSources([])
+    setSourceFile(null)
+    setActiveSession(null)
+    setFocusedConceptId(undefined)
+    setPresetLessonState('ready')
+    setNotebookConceptId(undefined)
+    setActiveNav('Learning Map')
+    setNotice({ kind: 'success', text: `${name}'s profile is ready.` })
+  }
+
+  const deleteProfile = (profile: Profile) => {
+    if (!window.confirm(`Delete ${profile.name}'s profile and all its learning data?`)) return
+    const next = profiles.filter(item => item.id !== profile.id)
+    setProfiles(next)
+    localStorage.setItem(profilesKey, JSON.stringify(next))
+    ;[planKey, completedKey, knownKey, preferencesKey, notesKey, sourcesKey].forEach(key => localStorage.removeItem(accountKey(key, profile.id)))
+    if (profile.id === account) switchAccount(defaultProfiles[0].id)
+    setNotice({ kind: 'success', text: `${profile.name}'s profile was deleted.` })
   }
 
   const changePreferences = (next: Preferences) => {
     setPreferences(next)
     localStorage.setItem(accountKey(preferencesKey, account), JSON.stringify(next))
+  }
+
+  const changeProvider = (next: AIProvider) => {
+    setProvider(next)
+    setModel(defaultModel[next])
   }
 
   const openNotebook = (conceptId: string) => {
@@ -585,19 +683,24 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
     localStorage.setItem(accountKey(notesKey, account), JSON.stringify(next))
     setNotice({ kind: 'success', text: 'Notebook page saved.' })
   }
-  const addSource = (label: string, kind: SourceType = 'text') => {
+  const addSource = (conceptId: string, label: string, kind: SourceType = 'text') => {
     const clean = label.trim()
-    if (!clean || sources.some(source => source.label === clean)) return
-    const next = [...sources, { id: `${Date.now()}-${sources.length}`, label: clean, kind, addedAt: new Date().toISOString() }]
+    if (!clean || sources.some(source => source.conceptId === conceptId && source.label === clean)) return
+    const next = [...sources, { id: `${Date.now()}-${sources.length}`, conceptId, label: clean, kind, addedAt: new Date().toISOString() }]
     setSources(next)
     localStorage.setItem(accountKey(sourcesKey, account), JSON.stringify(next))
-    setNotice({ kind: 'success', text: 'Source pinned to your notebook.' })
+    setNotice({ kind: 'success', text: 'Source pinned to this node.' })
+  }
+  const removeSource = (sourceId: string) => {
+    const next = sources.filter(source => source.id !== sourceId)
+    setSources(next)
+    localStorage.setItem(accountKey(sourcesKey, account), JSON.stringify(next))
   }
 
   const openConcept = (concept: PlanConcept) => {
     setFocusedConceptId(concept.id)
     setActiveNav('Learning Map')
-    if (!plan) setNotice({ kind: 'success', text: account === 'quantum' ? `${concept.name} focused on the learning map.` : 'Generate your plan to focus individual stations.' })
+    if (!plan) setNotice({ kind: 'success', text: `${concept.name} focused on the learning map.` })
   }
 
   const startSession = (session: StudySession) => {
@@ -614,7 +717,6 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
 
   const startConcept = (conceptId: string) => {
     if (!plan) {
-      if (account === 'explorer') return
       setFocusedConceptId(conceptId)
       setPresetLessonState('active')
       setNotice({ kind: 'success', text: `${conceptId} started. Your timer is running.` })
@@ -625,9 +727,16 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
     if (session) startSession(session)
   }
 
+  const toggleKnown = (conceptId: string) => {
+    const next = knownConceptIds.includes(conceptId) ? knownConceptIds.filter(id => id !== conceptId) : [...knownConceptIds, conceptId]
+    setKnownConceptIds(next)
+    localStorage.setItem(accountKey(knownKey, account), JSON.stringify(next))
+    setNotice({ kind: 'success', text: next.includes(conceptId) ? 'Marked as already known. Your planned hours are unchanged.' : 'Removed from already known.' })
+  }
+
   const requestPlan = async (sourceType: SourceType, value: string, file: File | null) => {
     const studyPreferences = { minutes_per_day: preferences.minutes, target_date: preferences.targetDate || undefined }
-    const headers: Record<string, string> = apiKey.trim() ? { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider } : {}
+    const headers: Record<string, string> = apiKey.trim() ? { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider, 'X-LLM-Model': model.trim() } : {}
     let request: Promise<Response>
     if (sourceType === 'pdf') {
         const form = new FormData()
@@ -657,10 +766,13 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
       localStorage.setItem(accountKey(planKey, account), JSON.stringify(body))
       setCompletedSessions([])
       localStorage.removeItem(accountKey(completedKey, account))
+      setKnownConceptIds([])
+      localStorage.removeItem(accountKey(knownKey, account))
       setActiveSession(null)
       setFocusedConceptId(body.schedule[0]?.concept_id)
       const sourceLabel = preferences.sourceType === 'pdf' ? sourceFile?.name : preferences.topic
-      if (sourceLabel?.trim()) addSource(sourceLabel.trim().slice(0, 180), preferences.sourceType)
+      const sourceConceptId = body.goal_concept_id ?? body.concepts[0]?.id
+      if (sourceLabel?.trim() && sourceConceptId) addSource(sourceConceptId, sourceLabel.trim().slice(0, 180), preferences.sourceType)
       setNotice({ kind: 'success', text: body.generation_mode === 'structural' ? `Draft route ready with ${body.statistics.concept_count} stations. Add an API key or start Ollama for subject-specific analysis.` : `Custom route ready with ${body.statistics.concept_count} necessary stations.` })
       setActiveNav('Learning Map')
     } catch (error) {
@@ -673,7 +785,7 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
   const requestExpansion = async (destination: string) => {
     const request = fetch('/api/plans/expand', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(apiKey.trim() && { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider }) },
+      headers: { 'Content-Type': 'application/json', ...(apiKey.trim() && { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider, 'X-LLM-Model': model.trim() }) },
       body: JSON.stringify({
         destination,
         existing_concepts: plan?.concepts.map(concept => concept.name) ?? [],
@@ -684,6 +796,22 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
     const body = await response.json().catch(() => ({})) as LineExpansion & { detail?: string }
     if (!response.ok) throw new Error(body.detail ?? 'Line extension failed. Is the API running?')
     return body
+  }
+
+  const requestRequiredPath = async (destinationId: string, destination: string) => {
+    const routeConcepts = plan?.concepts ?? stations.map(presetConcept)
+    const routeEdges = plan?.edges ?? stations.flatMap((station, index) => {
+      const previous = stations.slice(0, index).reverse().find(candidate => candidate.route === station.route)
+      return previous ? [{ from: previous.label, to: station.label }] : []
+    })
+    const response = await fetch('/api/plans/required-path', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(apiKey.trim() && { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider, 'X-LLM-Model': model.trim() }) },
+      body: JSON.stringify({ destination_id: destinationId, destination, concepts: routeConcepts.map(concept => ({ id: concept.id, name: concept.name })), edges: routeEdges }),
+    })
+    const body = await response.json().catch(() => ({})) as { concept_ids?: string[]; detail?: string }
+    if (!response.ok || !body.concept_ids?.length) throw new Error(body.detail ?? 'Could not find the required path.')
+    return body.concept_ids
   }
 
   const expandConcept = async (conceptId: string, conceptName: string) => {
@@ -702,6 +830,8 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
         localStorage.setItem(accountKey(planKey, account), JSON.stringify(branch))
         setCompletedSessions([])
         localStorage.removeItem(accountKey(completedKey, account))
+        setKnownConceptIds([])
+        localStorage.removeItem(accountKey(knownKey, account))
         setActiveSession(null)
         setFocusedConceptId(branch.schedule[0]?.concept_id)
         setNotice({ kind: 'success', text: `Detailed line ready with ${branch.statistics.concept_count} prerequisite stops.` })
@@ -749,10 +879,6 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
 
   const handleLesson = () => {
     if (!plan) {
-      if (account === 'explorer') {
-        setNotice({ kind: 'success', text: 'Choose a topic before starting your first lesson.' })
-        return
-      }
       const next = presetLessonState === 'ready' ? 'active' : presetLessonState === 'active' ? 'completed' : 'active'
       setPresetLessonState(next)
       setNotice({ kind: 'success', text: next === 'completed' ? 'Lesson completed. Progress updated.' : 'Lesson started. Your timer is running.' })
@@ -780,12 +906,12 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
   }
 
   return (
-    <div className="app-shell min-h-screen bg-ink text-white" data-theme={theme}>
+    <div className="app-shell min-h-screen bg-ink text-white" data-theme={theme} style={{ '--background-color': background } as CSSProperties}>
       <PixelAtmosphere />
-      <Sidebar active={activeNav} account={account} onAccountChange={switchAccount} onNavigate={setActiveNav} />
+      <Sidebar active={activeNav} account={account} profiles={profiles} onAccountChange={switchAccount} onCreateProfile={createProfile} onDeleteProfile={deleteProfile} onNavigate={setActiveNav} />
       <main className="main-column min-w-0 px-5 pb-5">
-        <TopControls preferences={preferences} sourceFile={sourceFile} provider={provider} apiKey={apiKey} onChange={changePreferences} onFileChange={setSourceFile} onProviderChange={setProvider} onApiKeyChange={setApiKey} onGenerate={generatePlan} generating={generating} />
-        {activeNav === 'Learning Map' ? <div className="dashboard-grid min-h-0"><LearningMap title={(plan?.title ?? preferences.topic) || 'Your learning route'} concepts={plan?.concepts} edges={plan?.edges} lines={plan?.lines} currentConceptId={focusedConceptId ?? currentConcept?.id} todayConceptId={currentSession?.concept_id ?? currentConcept?.id} goalConceptId={plan?.schedule?.[plan.schedule.length - 1]?.concept_id ?? (account === 'quantum' ? stations[stations.length - 1]?.label : undefined)} completedConceptIds={completedConceptIds} empty={!plan && account === 'explorer'} canGenerate={preferences.sourceType === 'pdf' ? !!sourceFile : !!preferences.topic.trim()} generating={generating} onGenerate={generatePlan} onStartConcept={startConcept} onExpandConcept={expandConcept} onOpenNotebook={openNotebook} /><StudyOverview preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} lessonState={lessonState} progress={progress} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} /><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div> : <WorkspaceView active={activeNav} theme={theme} presetAccount={account === 'quantum'} preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} completedSessions={completedSessions} lessonState={lessonState} progress={progress} notes={notes} sources={sources} notebookConceptId={notebookConceptId} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} onOpenConcept={openConcept} onStartSession={startSession} onNavigate={setActiveNav} onThemeChange={onThemeChange} onNotice={setNotice} onSelectNotebookConcept={setNotebookConceptId} onSaveNote={saveNote} onAddSource={addSource} />}
+        <TopControls preferences={preferences} sourceFile={sourceFile} provider={provider} model={model} apiKey={apiKey} onChange={changePreferences} onFileChange={setSourceFile} onProviderChange={changeProvider} onModelChange={setModel} onApiKeyChange={setApiKey} onGenerate={generatePlan} generating={generating} />
+        {activeNav === 'Learning Map' ? <div className="dashboard-grid min-h-0"><LearningMap title={(plan?.title ?? preferences.topic) || 'Your learning route'} concepts={plan?.concepts ?? (starterRoute ? undefined : [])} edges={plan?.edges} lines={plan?.lines} nodeLabelStyle={nodeLabelStyle} empty={!plan && !starterRoute} currentConceptId={focusedConceptId ?? currentConcept?.id} todayConceptId={currentSession?.concept_id ?? currentConcept?.id} goalConceptId={plan?.goal_concept_id ?? plan?.schedule?.[plan.schedule.length - 1]?.concept_id ?? (starterRoute ? stations[stations.length - 1]?.label : undefined)} knownConceptIds={knownConceptIds} completedConceptIds={completedConceptIds} canGenerate={preferences.sourceType === 'pdf' ? !!sourceFile : !!preferences.topic.trim()} generating={generating} onGenerate={generatePlan} onStartConcept={startConcept} onExpandConcept={expandConcept} onOpenNotebook={openNotebook} onToggleKnown={toggleKnown} onRequestRequiredPath={requestRequiredPath} /><StudyOverview preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} lessonState={lessonState} progress={progress} empty={!plan && !starterRoute} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} /><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div> : <WorkspaceView active={activeNav} theme={theme} background={background} nodeLabelStyle={nodeLabelStyle} preferences={preferences} plan={plan} starterRoute={starterRoute} currentConcept={currentConcept} currentSession={currentSession} completedSessions={completedSessions} lessonState={lessonState} progress={progress} notes={notes} sources={sources} notebookConceptId={notebookConceptId} onLessonAction={handleLesson} onViewPlan={() => setActiveNav('Study Plan')} onOpenConcept={openConcept} onStartSession={startSession} onNavigate={setActiveNav} onThemeChange={onThemeChange} onBackgroundChange={onBackgroundChange} onNodeLabelStyleChange={changeNodeLabelStyle} onNotice={setNotice} onSelectNotebookConcept={setNotebookConceptId} onSaveNote={saveNote} onAddSource={addSource} onRemoveSource={removeSource} />}
       </main>
       {generating && <RouteGeneration topic={expandingTopic ?? preferences.topic} expanding={!!expandingTopic} />}
       {notice && <div className={`dashboard-notice ${notice.kind}`} role="status"><span>{notice.text}</span><button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></button></div>}
@@ -793,18 +919,29 @@ function Dashboard({ theme, onThemeChange }: { theme: ColorTheme; onThemeChange:
   )
 }
 
-export default function App() {
+function MainApp() {
   const [entered, setEntered] = useState(false)
   const [theme, setTheme] = useState<ColorTheme>(() => localStorage.getItem(themeKey) === 'blue' ? 'blue' : 'pink')
+  const [background, setBackground] = useState(() => localStorage.getItem(backgroundKey) ?? themeBackground[theme])
   const changeTheme = (next: ColorTheme) => {
     setTheme(next)
     localStorage.setItem(themeKey, next)
+    setBackground(themeBackground[next])
+    localStorage.setItem(backgroundKey, themeBackground[next])
+  }
+  const changeBackground = (next: string) => {
+    setBackground(next)
+    localStorage.setItem(backgroundKey, next)
   }
   return (
     <div className="app-view-transition t-page-slide" data-page={entered ? '2' : '1'} data-theme={theme}>
       <section className="t-page" data-page-id="1" aria-hidden={entered} ref={element => { element?.toggleAttribute('inert', entered) }}><LandingPage onEnter={() => setEntered(true)} /></section>
-      <section className="t-page" data-page-id="2" aria-hidden={!entered} ref={element => { element?.toggleAttribute('inert', !entered) }}><Dashboard theme={theme} onThemeChange={changeTheme} /></section>
+      <section className="t-page" data-page-id="2" aria-hidden={!entered} ref={element => { element?.toggleAttribute('inert', !entered) }}><Dashboard theme={theme} background={background} onThemeChange={changeTheme} onBackgroundChange={changeBackground} /></section>
       <i className="page-rail" aria-hidden="true" />
     </div>
   )
+}
+
+export default function App() {
+  return window.location.pathname === '/maps' ? <MapsGallery /> : <MainApp />
 }

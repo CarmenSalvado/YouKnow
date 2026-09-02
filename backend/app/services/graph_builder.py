@@ -63,6 +63,13 @@ def build_graph(
         edges.remove(edge)
         removed.append(Edge(from_concept=edge[0], to_concept=edge[1]))
 
+    components = sorted(nx.weakly_connected_components(graph), key=lambda component: min(index[item] for item in component))
+    for left, right in zip(components, components[1:]):
+        source = max((item for item in left if graph.out_degree(item) == 0), key=index.__getitem__)
+        target = min((item for item in right if graph.in_degree(item) == 0), key=index.__getitem__)
+        graph.add_edge(source, target)
+        edges.add((source, target))
+
     order = list(nx.lexicographical_topological_sort(graph, key=index.__getitem__))
     levels: dict[str, int] = {}
     for concept_id in order:
@@ -77,4 +84,3 @@ def build_graph(
         for source, target in sorted(edges, key=lambda edge: (index[edge[1]], index[edge[0]]))
     ]
     return GraphResult(ordered_concepts, ordered_edges, order, levels, tuple(removed))
-

@@ -47,6 +47,24 @@ def test_ui_cannot_turn_backend_into_an_api_proxy() -> None:
     assert response.json()["detail"] == "Unsupported AI provider."
 
 
+def test_ui_can_select_a_provider_model() -> None:
+    service = routes.service_for("sk-test-key-long-enough", "qwen", "qwen-flash")
+
+    assert service.analysis_service is not None
+    assert service.analysis_service.llm.model == "qwen-flash"
+
+
+def test_ui_rejects_an_invalid_model_id() -> None:
+    response = TestClient(app).post(
+        "/api/plans/generate",
+        headers={"X-LLM-API-Key": "sk-test-key-long-enough", "X-LLM-Provider": "qwen", "X-LLM-Model": "qwen plus"},
+        json={"source": {"type": "topic", "value": "Roman history"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Invalid AI model ID."
+
+
 def test_youtube_transcript_is_normalized(monkeypatch) -> None:
     fetched = [SimpleNamespace(text="Bees use waggle dances."), SimpleNamespace(text="Hives need careful management.")]
     fetched = type("Fetched", (list,), {"language": "English", "language_code": "en", "is_generated": False})(fetched)

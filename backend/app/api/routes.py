@@ -1,10 +1,11 @@
 import asyncio
+import re
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.models import ExpandLineRequest, GeneratePlanRequest, LineExpansionResponse, PlanResponse, StudyPreferences
+from app.models import ExpandLineRequest, GeneratePlanRequest, LineExpansionResponse, PlanResponse, RequiredPathRequest, RequiredPathResponse, StudyPreferences
 from app.services.llm import CompatibleLLMClient, LLMClientError
 from app.services.plan_service import PlanAnalysisError, PlanGenerationUnavailable, PlanService
 from app.services.source_ingestion import SourceIngestionError, normalize_pdf
@@ -22,7 +23,7 @@ providers = {
 }
 
 
-def service_for(api_key: str | None, provider: str | None) -> PlanService:
+def service_for(api_key: str | None, provider: str | None, model: str | None = None) -> PlanService:
     if not api_key:
         return plan_service
     key = api_key.strip()
@@ -30,10 +31,13 @@ def service_for(api_key: str | None, provider: str | None) -> PlanService:
         raise HTTPException(status_code=422, detail="API key must be between 10 and 256 characters.")
     if provider not in providers:
         raise HTTPException(status_code=422, detail="Unsupported AI provider.")
-    model, base_url = providers[provider]
+    default_model, base_url = providers[provider]
+    selected_model = (model or default_model).strip()
+    if not re.fullmatch(r"[A-Za-z0-9._:/-]{1,100}", selected_model):
+        raise HTTPException(status_code=422, detail="Invalid AI model ID.")
     return PlanService(
         settings,
-        CompatibleLLMClient(api_key=key, model=model, base_url=base_url),
+        CompatibleLLMClient(api_key=key, model=selected_model, base_url=base_url),
         fallback_on_llm_error=False,
     )
 
@@ -44,9 +48,9 @@ def health() -> dict[str, str]:
 
 
 @router.post("/api/plans/generate", response_model=PlanResponse)
-async def generate_plan(request: GeneratePlanRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider")) -> PlanResponse:
+async def generate_plan(request: GeneratePlanRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider"), model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100)) -> PlanResponse:
     try:
-        return await service_for(api_key, provider).generate(request)
+        return await service_for(api_key, provider, model).generate(request)
     except SourceIngestionError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except PlanGenerationUnavailable as error:
@@ -56,9 +60,17 @@ async def generate_plan(request: GeneratePlanRequest, api_key: str | None = Head
 
 
 @router.post("/api/plans/expand", response_model=LineExpansionResponse)
-async def expand_line(request: ExpandLineRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider")) -> LineExpansionResponse:
+async def expand_line(request: ExpandLineRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider"), model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100)) -> LineExpansionResponse:
     try:
-        return await service_for(api_key, provider).expand(request)
+        return await service_for(api_key, provider, model).expand(request)
+    except (PlanAnalysisError, LLMClientError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post("/api/plans/required-path", response_model=RequiredPathResponse)
+async def required_path(request: RequiredPathRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider"), model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100)) -> RequiredPathResponse:
+    try:
+        return await service_for(api_key, provider, model).required_path(request)
     except (PlanAnalysisError, LLMClientError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
@@ -69,6 +81,7 @@ async def generate_plan_file(
     preferences: str = Form("{}"),
     api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256),
     provider: str | None = Header(default="openai", alias="X-LLM-Provider"),
+    model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100),
 ) -> PlanResponse:
     try:
         study_preferences = StudyPreferences.model_validate_json(preferences)
@@ -79,7 +92,7 @@ async def generate_plan_file(
             file.filename or "document.pdf",
             max_upload_bytes=settings.max_upload_bytes,
         )
-        return await service_for(api_key, provider).generate_normalized(source, study_preferences)
+        return await service_for(api_key, provider, model).generate_normalized(source, study_preferences)
     except ValidationError as error:
         raise HTTPException(status_code=422, detail=f"invalid preferences: {error}") from error
     except SourceIngestionError as error:

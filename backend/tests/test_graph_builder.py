@@ -47,3 +47,15 @@ def test_invalid_prerequisite_id() -> None:
             [Dependency(concept_id="known", prerequisites=["missing"])],
         )
 
+
+def test_build_graph_connects_components_without_dropping_concepts() -> None:
+    connected = build_graph(
+        [concept("alpha"), concept("beta"), concept("gamma"), concept("orphan")],
+        [
+            Dependency(concept_id="beta", prerequisites=["alpha"]),
+            Dependency(concept_id="gamma", prerequisites=["beta"]),
+        ],
+    )
+
+    assert connected.order == ["alpha", "beta", "gamma", "orphan"]
+    assert [(edge.from_concept, edge.to_concept) for edge in connected.edges] == [("alpha", "beta"), ("beta", "gamma"), ("gamma", "orphan")]

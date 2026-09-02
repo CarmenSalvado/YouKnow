@@ -60,8 +60,9 @@ def test_ai_analysis_flows_into_deterministic_graph_and_schedule() -> None:
     )
 
     position = {concept.id: index for index, concept in enumerate(plan.concepts)}
-    assert plan.title == "AI Quantum Computing"
-    assert plan.concepts[-1].id == "quantum_applications"
+    assert plan.title == "Quantum Computing"
+    assert plan.goal_concept_id == "learning_goal"
+    assert plan.concepts[-1].name == "Quantum Computing"
     assert plan.concepts[-1].level >= 4
     assert all(position[edge.from_concept] < position[edge.to_concept] for edge in plan.edges)
     assert plan.statistics.total_sessions == len(plan.schedule)
@@ -104,7 +105,8 @@ def test_invalid_relationships_are_repaired_without_changing_concepts() -> None:
         )
     )
 
-    assert len(plan.concepts) == len(QUANTUM_CONCEPTS)
+    assert len(plan.concepts) == len(QUANTUM_CONCEPTS) + 1
+    assert plan.goal_concept_id == "learning_goal"
     assert len(llm.calls) == 2
     assert llm.calls[1]["response_model"] is RelationshipRepair
 
@@ -133,6 +135,22 @@ def test_openai_client_retries_invalid_structured_output_once() -> None:
 
     assert result == valid
     assert responses.calls == 2
+
+
+def test_analyzed_concept_uses_safe_defaults_for_omitted_llm_fields() -> None:
+    concept = AnalyzedConcept.model_validate({
+        "id": "heat_transfer_methods",
+        "name": "Heat Transfer Methods",
+        "description": "Conduction, convection, and radiation in cooking.",
+        "estimated_minutes": 30,
+        "category": "core",
+    })
+
+    assert (concept.difficulty, concept.source_evidence, concept.external_prerequisite) == (
+        3,
+        "No source evidence provided.",
+        False,
+    )
 
 
 def test_compatible_client_requests_and_validates_json() -> None:
@@ -169,9 +187,10 @@ def test_arbitrary_topic_generates_custom_local_plan_without_llm() -> None:
     )
 
     assert plan.title == "Urban Beekeeping"
-    assert len(plan.concepts) == 12
+    assert len(plan.concepts) == 13
     assert all("Urban Beekeeping" in concept.name for concept in plan.concepts)
-    assert plan.concepts[-1].id == "capstone"
+    assert plan.goal_concept_id == "learning_goal"
+    assert plan.concepts[-1].name == "Urban Beekeeping"
     assert plan.statistics.total_sessions == len(plan.schedule)
 
 
@@ -196,11 +215,11 @@ def test_llm_failure_falls_back_to_local_plan() -> None:
     assert plan.concepts[0].name == "Mycology notes: Orientation"
 
 
-def test_narrow_topic_keeps_only_the_stations_returned_by_analysis() -> None:
+def test_disconnected_topic_is_connected_without_losing_concepts() -> None:
     analysis = quantum_analysis().model_copy(
         update={
             "title": "Binary Search",
-            "concepts": quantum_analysis().concepts[:4],
+            "concepts": quantum_analysis().concepts[:12],
             "dependencies": [],
         }
     )
@@ -216,7 +235,10 @@ def test_narrow_topic_keeps_only_the_stations_returned_by_analysis() -> None:
     )
 
     assert plan.title == "Binary Search"
-    assert len(plan.concepts) == 4
+    assert len(plan.concepts) == 13
+    assert len(plan.edges) == 12
+    assert {concept.id for concept in plan.concepts[:-1]} == {concept.id for concept in analysis.concepts}
+    assert plan.concepts[-1].name == "Binary Search"
 
 
 def test_expansion_count_and_named_lines_come_from_analysis() -> None:

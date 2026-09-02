@@ -65,11 +65,11 @@ class AnalyzedConcept(BaseModel):
     id: ConceptId
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    difficulty: int = Field(ge=1, le=5)
+    difficulty: int = Field(default=3, ge=1, le=5)
     estimated_minutes: int = Field(gt=0)
     category: ConceptCategory
-    source_evidence: str = Field(min_length=1)
-    external_prerequisite: bool
+    source_evidence: str = Field(default="No source evidence provided.", min_length=1)
+    external_prerequisite: bool = False
 
 
 class Dependency(BaseModel):
@@ -86,15 +86,15 @@ class LearningLine(BaseModel):
 
 class SourceAnalysis(BaseModel):
     title: str = Field(min_length=1)
-    concepts: list[AnalyzedConcept] = Field(min_length=4, max_length=25)
+    concepts: list[AnalyzedConcept] = Field(min_length=12, max_length=24)
     dependencies: list[Dependency]
-    lines: list[LearningLine] = Field(default_factory=list, max_length=8)
+    lines: list[LearningLine] = Field(default_factory=list, max_length=6)
 
 
 class PrerequisiteAnalysis(BaseModel):
     concepts: list[AnalyzedConcept] = Field(default_factory=list, max_length=25)
     dependencies: list[Dependency] = Field(default_factory=list)
-    lines: list[LearningLine] = Field(default_factory=list, max_length=8)
+    lines: list[LearningLine] = Field(default_factory=list, max_length=6)
 
 
 class RelationshipRepair(BaseModel):
@@ -106,6 +106,29 @@ class Edge(BaseModel):
 
     from_concept: ConceptId = Field(alias="from")
     to_concept: ConceptId = Field(alias="to")
+
+
+class RequiredPathConcept(BaseModel):
+    id: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=1)
+
+
+class RequiredPathEdge(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_concept: str = Field(alias="from", min_length=1, max_length=120)
+    to_concept: str = Field(alias="to", min_length=1, max_length=120)
+
+
+class RequiredPathRequest(BaseModel):
+    destination_id: str = Field(min_length=1, max_length=120)
+    destination: str = Field(min_length=1)
+    concepts: list[RequiredPathConcept] = Field(min_length=1, max_length=100)
+    edges: list[RequiredPathEdge] = Field(default_factory=list, max_length=200)
+
+
+class RequiredPathResponse(BaseModel):
+    concept_ids: list[str] = Field(min_length=1, max_length=100)
 
 
 class StudyPreferences(BaseModel):
@@ -172,6 +195,7 @@ class PlanResponse(BaseModel):
     concepts: list[Concept]
     edges: list[Edge]
     lines: list[LearningLine]
+    goal_concept_id: ConceptId
     schedule: list[StudySession]
     statistics: PlanStatistics
 

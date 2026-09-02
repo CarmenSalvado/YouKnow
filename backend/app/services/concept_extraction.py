@@ -5,6 +5,8 @@ from app.models import (
     Dependency,
     NormalizedSource,
     PrerequisiteAnalysis,
+    RequiredPathConcept,
+    RequiredPathResponse,
     RelationshipRepair,
     SourceAnalysis,
     SourceType,
@@ -16,8 +18,7 @@ SYSTEM_PROMPT = """You are a knowledge-structure analyst.
 Your only job is to identify meaningful concepts, estimate their difficulty and study time, and propose prerequisite relationships.
 
 Rules:
-- Return the minimum sufficient set of 4 to 25 substantial concepts. Never pad the route to reach a quota.
-- Let scope determine the count: a narrow concept may need 4 to 8 stations; a broad discipline may need 15 to 25.
+- Return 12 to 24 substantial concepts. Cover the route broadly enough to be useful from the first map.
 - Use concrete, domain-specific concept names. Avoid generic filler such as orientation, overview, key vocabulary, or core principles.
 - Use stable snake_case IDs.
 - Categories are foundation, core, advanced, or application.
@@ -27,10 +28,11 @@ Rules:
 - Include prerequisite stations needed for a motivated beginner to understand the requested destination, even when the user did not name them.
 - Every prerequisite ID must match an extracted concept ID exactly.
 - Do not create self-dependencies or duplicate prerequisites.
+- Return one weakly connected DAG: every metro line must join another line through a prerequisite or the shared destination.
 - Do not generate a calendar, study sessions, final order, levels, or a roadmap. Python calculates those.
 - Organize every concept into exactly one coherent metro line.
 - Give each line a short, memorable, subject-specific name. Never use generic names such as Foundation, Core, Advanced, or Application.
-- Create only as many lines as the knowledge structure needs, and list every concept ID exactly once across them.
+- Create 3 to 6 lines for a complete map, and list every concept ID exactly once across them.
 """
 
 PREREQUISITE_SYSTEM_PROMPT = """You design the track that must come before one learning destination.
@@ -53,7 +55,8 @@ class ConceptAnalysisService:
 
 TOPIC: {source.title}
 
-Treat the requested subject itself as the destination and include it as a concept. Every other station must be a genuinely necessary prerequisite, practice step, or application for that destination; omit adjacent trivia and business topics unless the request requires them.
+Treat the requested subject itself as the destination, but do not include it as a concept: the backend adds that exact end-goal node. Every returned station must be a genuinely necessary prerequisite, practice step, or application for that destination; omit adjacent trivia and business topics unless the request requires them.
+Return at most 23 concepts so the added end-goal stays within the 24-station map templates.
 Cover foundations, core ideas, advanced ideas, and representative applications only where appropriate.
 Set external_prerequisite=false for every concept because this is a topic expansion.
 For source_evidence, briefly explain why the concept is necessary for understanding the topic."""
@@ -93,6 +96,28 @@ SOURCE CONTENT:
                 "For source_evidence, explain briefly why each station is required. Set external_prerequisite=false."
             ),
             response_model=PrerequisiteAnalysis,
+        )
+
+    async def select_required_path(
+        self,
+        destination_id: str,
+        destination: str,
+        concepts: list[RequiredPathConcept],
+        edges: list[dict[str, str]],
+    ) -> RequiredPathResponse:
+        return await self.llm.structured_completion(
+            system_prompt=(
+                "You select a minimum prerequisite path inside an existing learning map. "
+                "Return only concept IDs from the supplied map, always including the destination ID. "
+                "Include every concept transitively required by the map relationships, and no unrelated or downstream concepts."
+            ),
+            user_prompt=(
+                f"DESTINATION ID: {destination_id}\nDESTINATION: {destination}\n"
+                f"MAP CONCEPTS: {[concept.model_dump() for concept in concepts]}\n"
+                f"PREREQUISITE EDGES (from -> to): {edges}\n"
+                "Return the complete minimum required path as concept_ids."
+            ),
+            response_model=RequiredPathResponse,
         )
 
     async def repair_relationships(

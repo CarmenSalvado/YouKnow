@@ -6,3 +6,5 @@ Static React dashboard for the AI learning planner concept.
 npm install
 npm run dev
 ```
+
+This starts both Vite and the FastAPI backend used by map generation.
