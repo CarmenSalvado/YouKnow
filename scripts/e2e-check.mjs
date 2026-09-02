@@ -61,10 +61,6 @@ try {
   const quantumMapActions = await run(`[...document.querySelectorAll('.map-inspector-actions button')].map(button => button.className).sort()`)
   if (!await run(`(() => { const panel = document.querySelector('.study-overview'); const last = panel.lastElementChild; return Math.abs(last.getBoundingClientRect().bottom - panel.getBoundingClientRect().bottom) < 2 })()`)) throw new Error('The study overview does not fill its parent height.')
   if (!await run(`document.querySelector('.study-overview section:nth-child(2)')?.textContent.includes('Quantum Computing') && document.querySelector('.study-overview section:last-child')?.textContent.includes('12h 30m')`)) throw new Error('The study overview still shows placeholder route data.')
-  if (await run(`document.querySelectorAll('.study-bars button[aria-label]').length`) !== 7) throw new Error('The weekly study load is not actionable.')
-  await run(`document.querySelector('.study-bars button').click()`)
-  await eventually(`document.querySelector('[aria-current="page"]')?.textContent.trim() === 'Study Plan'`, 'The weekly study load did not open the plan.')
-  await clickText('Learning Map')
   await clickText('Maya Chen')
   await eventually(`document.querySelector('.user-card')?.textContent.includes('Maya Chen') && document.querySelectorAll('.metro-station').length > 12`, 'Returning to Explorer did not restore the starter route.')
   if (JSON.stringify(await run(`[...document.querySelectorAll('.map-inspector-actions button')].map(button => button.className).sort()`)) !== JSON.stringify(quantumMapActions)) throw new Error('Profiles expose different map actions.')
@@ -84,7 +80,7 @@ try {
   await run(`document.querySelector('.user-card').click()`)
   if (!await run(`document.querySelector('[aria-current="page"]')?.textContent.trim() === 'Settings'`)) throw new Error('The profile shortcut did not open settings.')
 
-  for (const item of ['Study Plan', 'Library', 'Progress', 'AI Coach', 'Settings', 'Learning Map']) {
+  for (const item of ['Library', 'Progress', 'AI Coach', 'Settings', 'Learning Map']) {
     await clickText(item)
     if (!await run(`document.querySelector('[aria-current="page"]')?.textContent.trim() === ${JSON.stringify(item)}`)) throw new Error(`${item} navigation failed.`)
   }
@@ -143,11 +139,9 @@ try {
   await run(`document.querySelector('[aria-label="Dismiss notification"]').click()`)
   if (await run(`!!document.querySelector('[role="status"]')`)) throw new Error('The notification did not dismiss.')
 
-  await clickText('View Plan')
-  if (!await run(`document.querySelector('[aria-current="page"]')?.textContent.trim() === 'Study Plan'`)) throw new Error('View Plan did not open the study plan.')
-
-  const chosenLesson = await run(`document.querySelectorAll('.session-list button')[1].querySelector('strong').textContent`)
-  await run(`document.querySelectorAll('.session-list button')[1].click()`)
+  const chosenLesson = await run(`document.querySelectorAll('.generated-station')[1]?.getAttribute('aria-label')?.split(':')[0]`)
+  await run(`document.querySelectorAll('.generated-station')[1]?.click()`)
+  await clickText('Start lesson')
   await eventually(`document.querySelector('[aria-current="page"]')?.textContent.trim() === 'Learning Map' && document.querySelector('.map-heading h1')?.textContent === ${JSON.stringify(chosenLesson)}`, 'Choosing a scheduled lesson did not focus it on the map.')
   await eventually(`[...document.querySelectorAll('button')].some(button => button.textContent.includes('Complete Lesson'))`, 'The chosen lesson did not start.')
   await eventually(`document.querySelector('[role="timer"]')?.textContent.includes(':')`, 'The lesson timer did not appear.')

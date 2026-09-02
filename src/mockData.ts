@@ -1,4 +1,4 @@
-export const navigation = ['Learning Map', 'Study Plan', 'Library', 'Progress', 'AI Coach', 'Settings']
+export const navigation = ['Learning Map', 'Library', 'Progress', 'AI Coach', 'Settings']
 
 export const week = [
   { day: 'SUN', date: 18 },

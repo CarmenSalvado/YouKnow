@@ -964,12 +964,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
 }
 .workspace-card h1 { margin: 8px 0 0; color: #f2f6fc; font-size: clamp(28px, 3vw, 48px); line-height: 1; letter-spacing: -.04em; }
 .workspace-copy { max-width: 660px; margin: 16px 0 0; color: #98a6b9; font-size: 13px; line-height: 1.7; }
-.session-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 28px; }
-.session-list > button { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 58px; padding: 0 16px; border: 1px solid #24364e; border-radius: 8px; background: #0a1727; text-align: left; transition: border-color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out); }
-.session-list span { color: #5596ff; font: 600 10px "IBM Plex Mono", monospace; }
-.session-list strong { color: #e6edf7; font-size: 12px; }
-.session-list small { display: flex; align-items: center; gap: 6px; }
-.session-list small { color: #7f8da1; font-size: 10px; }
 .library-view { height: 100%; padding: 0; }
 .library-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 32px; padding: clamp(28px, 3vw, 44px); border-bottom: 1px solid #22354d; background: radial-gradient(circle at 12% 15%, rgba(46,128,255,.12), transparent 36%); }
 .library-hero h1 { max-width: 760px; font-size: clamp(34px, 4vw, 58px); }
@@ -1128,14 +1122,14 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
 .lesson-button { transition: background-color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out); }
 .lesson-button svg { transition: transform var(--motion-fast) var(--ease-out); }
 .milestone-progress { transform-origin: left; animation: progress-fill 720ms var(--ease-out) 520ms both; }
-.study-bars button { display: flex; height: 100%; flex: 1; align-items: center; flex-direction: column; justify-content: flex-end; gap: 6px; border: 0; padding: 0; color: inherit; }
+.study-bars .study-bar { display: flex; height: 100%; flex: 1; align-items: center; flex-direction: column; justify-content: flex-end; gap: 6px; border: 0; padding: 0; color: inherit; }
 .study-bar-fill { width: 12px; border-radius: 3px 3px 0 0; transform-origin: bottom; animation: bar-grow 520ms var(--ease-out) 620ms both; transition: filter var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out); }
-.study-bars > button:nth-child(2) .study-bar-fill { animation-delay: 660ms; }
-.study-bars > button:nth-child(3) .study-bar-fill { animation-delay: 700ms; }
-.study-bars > button:nth-child(4) .study-bar-fill { animation-delay: 740ms; }
-.study-bars > button:nth-child(5) .study-bar-fill { animation-delay: 780ms; }
-.study-bars > button:nth-child(6) .study-bar-fill { animation-delay: 820ms; }
-.study-bars > button:nth-child(7) .study-bar-fill { animation-delay: 860ms; }
+.study-bars > .study-bar:nth-child(2) .study-bar-fill { animation-delay: 660ms; }
+.study-bars > .study-bar:nth-child(3) .study-bar-fill { animation-delay: 700ms; }
+.study-bars > .study-bar:nth-child(4) .study-bar-fill { animation-delay: 740ms; }
+.study-bars > .study-bar:nth-child(5) .study-bar-fill { animation-delay: 780ms; }
+.study-bars > .study-bar:nth-child(6) .study-bar-fill { animation-delay: 820ms; }
+.study-bars > .study-bar:nth-child(7) .study-bar-fill { animation-delay: 860ms; }
 .streak-card > div:last-child span { transform-origin: left; animation: progress-fill 360ms var(--ease-out) 260ms both; }
 
 .calendar-strip { border: 0; }
@@ -1169,12 +1163,12 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
   .generate-button:hover svg { transform: rotate(-10deg) scale(1.1); }
   .lesson-button:hover svg { transform: translateX(3px); }
   .plan-link:hover { color: #8bb5ff; transform: translateX(2px); }
-  .study-bars button:hover .study-bar-fill { filter: brightness(1.5); transform: scaleX(1.2); }
+  .study-bars .study-bar:hover .study-bar-fill { filter: brightness(1.5); transform: scaleX(1.2); }
   .map-tools button:hover { color: white; background: #112238; transform: translateY(-1px); }
   .metro-station:hover > circle:not(.station-hit) { transform: scale(1.08); }
   .map-inspector button:hover { border-color: #4e7fbd; background-color: #122a47; color: #fff; transform: translateY(-1px); }
   .map-inspector-actions .start-node:hover { background: #2879ef; }
-  .session-list > button:hover, .concept-card:hover { border-color: #3767a5; background: #0d2036; transform: translateY(-2px); }
+  .concept-card:hover { border-color: #3767a5; background: #0d2036; transform: translateY(-2px); }
   .coach-form button:hover, .settings-card button:hover { background: #2778f2; transform: translateY(-2px); }
   .dashboard-notice button:hover { background: rgba(255,255,255,.1); }
   .user-card:hover { color: white; transform: translateX(2px); }
@@ -1187,7 +1181,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
 .map-tools button:active,
 .coach-form button:active,
 .settings-card button:active,
-.session-list > button:active,
 .concept-card:active,
 .dashboard-notice button:active,
 .user-card:active { transform: scale(.97); }
@@ -1332,7 +1325,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
   .map-inspector-stats { margin-top: 9px; }
   .map-prerequisites { margin-top: 9px; }
   .map-inspector-actions { margin-top: 10px; }
-  .session-list { grid-template-columns: 1fr; }
   .library-summary { grid-template-columns: 1fr 1fr; width: 100%; }
   .library-summary span { min-width: 0; }
   .library-stages { grid-template-columns: 1fr; }
@@ -1587,7 +1579,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
 }
 .workspace-copy,
 .library-hero > div:first-child > p:last-child { color: #ecc2d0; }
-.session-list > button,
 .concept-card,
 .progress-hero,
 .progress-panel,
@@ -1598,9 +1589,7 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
   border-radius: 2px;
   background: #321a25;
 }
-.session-list span,
 .concept-number { color: var(--contrast); }
-.session-list small { color: #c8aeb8; font-size: 11px; }
 .library-hero { border-color: #663047; background: radial-gradient(circle at 12% 15%, var(--contrast-glow), transparent 36%); }
 .library-feature,
 .library-feature.green,
@@ -1620,6 +1609,44 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
 .library-stage > header p { color: #c9aab6; font-size: 11px; }
 .concept-card p { color: #cdb1bc; font-size: 11px; }
 .concept-card small { color: #c3a7b2; font-size: 10px; }
+.library-view .section-label { font-size: 15px; }
+.library-hero > div:first-child > p:last-child { font-size: 18px; }
+.library-summary span { min-width: 158px; padding: 20px 22px; font-size: 14px; }
+.library-summary strong { margin-bottom: 8px; font-size: 25px; }
+.library-feature { min-height: 500px; padding: 34px; }
+.library-feature-label,
+.library-feature small { font-size: 15px; }
+.library-feature h2 { font-size: clamp(36px, 2.8vw, 50px); }
+.library-feature p { font-size: 18px; line-height: 1.65; }
+.library-feature-action { font-size: 16px; }
+.library-stage > header { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; }
+.library-stage > header > span { font-size: 14px; }
+.library-stage > header h2 { font-size: 24px; }
+.library-stage > header p { font-size: 17px; line-height: 1.5; }
+.library-stage > header > strong { min-width: 34px; height: 34px; font-size: 14px; }
+.concept-grid { gap: 12px; margin-top: 22px; }
+.concept-card { grid-template-columns: 38px minmax(0, 1fr); gap: 16px; min-height: 176px; padding: 22px; }
+.concept-number { font-size: 14px; }
+.concept-card strong { font-size: 20px; line-height: 1.35; }
+.concept-card p { margin-block: 10px 16px; font-size: 17px; line-height: 1.55; }
+.concept-card small { gap: 9px; font-size: 14px; }
+.notebook-shelf > header h2 { font-size: clamp(32px, 3vw, 44px); }
+.notebook-shelf > header p:not(.section-label) { font-size: 17px; line-height: 1.5; }
+.notebook-count { font-size: 14px; }
+.node-notebook-actions > button { height: 44px; padding-inline: 15px; font-size: 14px; }
+.node-notebook-actions > button:last-child { width: 44px; }
+.notebook-paper-head span,
+.postit-header span { font-size: 13px; }
+.notebook-paper-head strong { font-size: 21px; }
+.notebook-paper textarea { font-size: 18px; }
+.notebook-paper footer { font-size: 14px; }
+.notebook-paper footer button { min-height: 42px; font-size: 14px; }
+.postit-header strong { font-size: 23px; }
+.source-notebook form input { height: 44px; font-size: 16px; }
+.source-notebook form button { height: 44px; font-size: 14px; }
+.source-postit span { font-size: 13px; }
+.source-postit p,
+.source-empty { font-size: 16px; }
 .route-dot,
 .route-progress-fill { background: #2ec5ff; }
 .route-dot.green,
@@ -1735,7 +1762,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
 .app-shell[data-theme="blue"] .map-inspector > header > button,
 .app-shell[data-theme="blue"] .map-inspector-stats span,
 .app-shell[data-theme="blue"] .map-prerequisites button,
-.app-shell[data-theme="blue"] .session-list > button,
 .app-shell[data-theme="blue"] .concept-card,
 .app-shell[data-theme="blue"] .progress-hero,
 .app-shell[data-theme="blue"] .progress-panel,
@@ -1796,7 +1822,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
   .lesson-button:hover,
   .coach-form button:hover,
   .settings-card button:hover { background: #4a2232 !important; }
-  .session-list > button:hover,
   .concept-card:hover { border-color: #ff8caf; background: #42202e; }
 }
 
