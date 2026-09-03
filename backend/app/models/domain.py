@@ -7,7 +7,7 @@ from typing import Any, Annotated
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
-ConceptId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]*$")]
+ConceptId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_]*$")]
 
 
 class SourceType(StrEnum):
