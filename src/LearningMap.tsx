@@ -340,9 +340,7 @@ export default function LearningMap({ title = 'Quantum Computing', concepts, edg
   }
   const handleEmptyAction = () => {
     if (canGenerate) return onGenerate?.()
-    const source = document.querySelector<HTMLInputElement>('[aria-label="Learning source content"], [aria-label="PDF source"]')
-    source?.focus()
-    if (source?.type === 'file') source.click()
+    document.querySelector<HTMLInputElement>('[aria-label="Learning title"]')?.focus()
   }
 
   return (

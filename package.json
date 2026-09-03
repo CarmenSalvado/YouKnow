@@ -9,6 +9,8 @@
     "check:map": "node --experimental-strip-types scripts/check-map-layout.mjs",
     "check:ui": "node scripts/check-ui.mjs",
     "check:e2e": "node scripts/e2e-check.mjs",
+    "video": "remotion studio video/index.ts",
+    "video:render": "remotion render video/index.ts YouKnowPromo out/youknow-promo.mp4",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
@@ -17,11 +19,14 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.520",
+    "@remotion/google-fonts": "^4.0.520",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
+    "remotion": "^4.0.520",
     "tailwindcss": "^3.4.16",
     "typescript": "~5.6.2",
     "vite": "^6.0.1"

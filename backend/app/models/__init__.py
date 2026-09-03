@@ -23,6 +23,7 @@ from .domain import (
     SourceType,
     StudyPreferences,
     StudySession,
+    TitlePlanRequest,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "SourceType",
     "StudyPreferences",
     "StudySession",
+    "TitlePlanRequest",
 ]

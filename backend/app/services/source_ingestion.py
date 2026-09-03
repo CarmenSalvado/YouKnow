@@ -33,7 +33,7 @@ def normalize_source(source: SourceInput) -> NormalizedSource:
     if source.type is SourceType.YOUTUBE:
         return normalize_youtube(source.value)
     if source.type is SourceType.PDF:
-        raise SourceIngestionError("PDF sources must use /api/plans/generate-file")
+        raise SourceIngestionError("PDF sources must use /api/legacy/plans/generate-file")
     raise SourceIngestionError(f"unsupported source type: {source.type.value}")
 
 

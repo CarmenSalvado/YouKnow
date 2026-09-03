@@ -158,6 +158,18 @@ class GeneratePlanRequest(BaseModel):
     preferences: StudyPreferences = Field(default_factory=StudyPreferences)
 
 
+class TitlePlanRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    preferences: StudyPreferences = Field(default_factory=StudyPreferences)
+
+    @field_validator("title")
+    @classmethod
+    def strip_title(cls, value: str) -> str:
+        if not (value := value.strip()):
+            raise ValueError("title cannot be blank")
+        return value
+
+
 class ExpandLineRequest(BaseModel):
     destination: str = Field(min_length=1)
     existing_concepts: list[str] = Field(default_factory=list, max_length=100)

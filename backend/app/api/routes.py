@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.models import ExpandLineRequest, GeneratePlanRequest, LineExpansionResponse, PlanResponse, RequiredPathRequest, RequiredPathResponse, StudyPreferences
+from app.models import ExpandLineRequest, GeneratePlanRequest, LineExpansionResponse, PlanResponse, RequiredPathRequest, RequiredPathResponse, SourceInput, SourceType, StudyPreferences, TitlePlanRequest
 from app.services.llm import CompatibleLLMClient, LLMClientError
 from app.services.plan_service import PlanAnalysisError, PlanGenerationUnavailable, PlanService
 from app.services.source_ingestion import SourceIngestionError, normalize_pdf
@@ -48,9 +48,10 @@ def health() -> dict[str, str]:
 
 
 @router.post("/api/plans/generate", response_model=PlanResponse)
-async def generate_plan(request: GeneratePlanRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider"), model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100)) -> PlanResponse:
+async def generate_plan(request: TitlePlanRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider"), model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100)) -> PlanResponse:
     try:
-        return await service_for(api_key, provider, model).generate(request)
+        legacy_request = GeneratePlanRequest(source=SourceInput(type=SourceType.TOPIC, value=request.title), preferences=request.preferences)
+        return await service_for(api_key, provider, model).generate(legacy_request)
     except SourceIngestionError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except PlanGenerationUnavailable as error:
@@ -75,7 +76,19 @@ async def required_path(request: RequiredPathRequest, api_key: str | None = Head
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
-@router.post("/api/plans/generate-file", response_model=PlanResponse)
+@router.post("/api/legacy/plans/generate", response_model=PlanResponse, deprecated=True)
+async def generate_plan_legacy(request: GeneratePlanRequest, api_key: str | None = Header(default=None, alias="X-LLM-API-Key", max_length=256), provider: str | None = Header(default="openai", alias="X-LLM-Provider"), model: str | None = Header(default=None, alias="X-LLM-Model", max_length=100)) -> PlanResponse:
+    try:
+        return await service_for(api_key, provider, model).generate(request)
+    except SourceIngestionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except PlanGenerationUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except (PlanAnalysisError, LLMClientError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post("/api/legacy/plans/generate-file", response_model=PlanResponse, deprecated=True)
 async def generate_plan_file(
     file: UploadFile = File(...),
     preferences: str = Form("{}"),

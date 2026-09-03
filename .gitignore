@@ -5,3 +5,6 @@ vite.config.js
 vite.config.d.ts
 palette-previews-round-2/
 palette-previews/
+out/
+video/
+public/music.mp3

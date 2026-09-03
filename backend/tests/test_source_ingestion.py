@@ -29,7 +29,7 @@ def test_short_ui_api_key_is_rejected() -> None:
     response = TestClient(app).post(
         "/api/plans/generate",
         headers={"X-LLM-API-Key": "short", "X-LLM-Provider": "qwen"},
-        json={"source": {"type": "topic", "value": "Roman history"}},
+        json={"title": "Roman history"},
     )
 
     assert response.status_code == 422
@@ -40,7 +40,7 @@ def test_ui_cannot_turn_backend_into_an_api_proxy() -> None:
     response = TestClient(app).post(
         "/api/plans/generate",
         headers={"X-LLM-API-Key": "sk-test-key-long-enough", "X-LLM-Provider": "http://127.0.0.1"},
-        json={"source": {"type": "topic", "value": "Roman history"}},
+        json={"title": "Roman history"},
     )
 
     assert response.status_code == 422
@@ -58,7 +58,7 @@ def test_ui_rejects_an_invalid_model_id() -> None:
     response = TestClient(app).post(
         "/api/plans/generate",
         headers={"X-LLM-API-Key": "sk-test-key-long-enough", "X-LLM-Provider": "qwen", "X-LLM-Model": "qwen plus"},
-        json={"source": {"type": "topic", "value": "Roman history"}},
+        json={"title": "Roman history"},
     )
 
     assert response.status_code == 422
@@ -78,6 +78,30 @@ def test_youtube_transcript_is_normalized(monkeypatch) -> None:
     assert source.metadata["language_code"] == "en"
 
 
+def test_title_generates_a_route(monkeypatch) -> None:
+    monkeypatch.setattr(routes, "plan_service", PlanService(Settings(app_env="development", llm_api_key=None, llm_model=None)))
+
+    response = TestClient(app).post(
+        "/api/plans/generate",
+        json={"title": "Urban Beekeeping", "preferences": {"minutes_per_day": 30, "start_date": "2026-08-27"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "Urban Beekeeping"
+
+    legacy_response = TestClient(app).post(
+        "/api/legacy/plans/generate",
+        json={"source": {"type": "text", "value": "Fungi, spores, and hyphae."}},
+    )
+    assert legacy_response.status_code == 200
+
+    old_contract_response = TestClient(app).post(
+        "/api/plans/generate",
+        json={"source": {"type": "topic", "value": "Urban Beekeeping"}},
+    )
+    assert old_contract_response.status_code == 422
+
+
 def test_pdf_upload_generates_a_route(monkeypatch) -> None:
     writer = PdfWriter()
     page = writer.add_blank_page(300, 300)
@@ -91,7 +115,7 @@ def test_pdf_upload_generates_a_route(monkeypatch) -> None:
     monkeypatch.setattr(routes, "plan_service", PlanService(Settings(app_env="development", llm_api_key=None, llm_model=None)))
 
     response = TestClient(app).post(
-        "/api/plans/generate-file",
+        "/api/legacy/plans/generate-file",
         files={"file": ("mycology.pdf", pdf.getvalue(), "application/pdf")},
         data={"preferences": '{"minutes_per_day": 30, "start_date": "2026-08-27"}'},
     )

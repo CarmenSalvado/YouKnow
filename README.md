@@ -3,9 +3,9 @@
 ![YouKnow demo](./gifs/landing.gif)
 
 YouKnow turns an overwhelming subject into a route you can actually follow.
-Choose a topic, paste a source, or upload a PDF. YouKnow finds the concepts
-that matter, connects their prerequisites, and schedules the next lesson around
-the time you have.
+Give YouKnow the title of what you want to learn. It finds the concepts that
+matter, connects their prerequisites, and schedules the next lesson around the
+time you have.
 
 ## Why it works
 
@@ -46,18 +46,24 @@ uv run uvicorn app.main:app --reload
 
 The API docs are available at `http://127.0.0.1:8000/docs`.
 
-## Learning sources
+## Generate a route
 
-The planner accepts:
+The current product starts from one input: the title of what you want to learn.
 
-- a topic or free-form text;
-- a YouTube URL (transcript is retrieved before analysis);
-- a PDF upload.
+```http
+POST /api/plans/generate
+Content-Type: application/json
 
-The backend uses an LLM to extract concepts and prerequisite proposals, then
-validates, orders, and schedules the graph deterministically. Without a cloud
-key, it can use a local Ollama model; if no model is available, it still returns
-a structural route.
+{
+  "title": "Urban Beekeeping",
+  "preferences": { "minutes_per_day": 30 }
+}
+```
+
+The backend uses an LLM to propose concepts and prerequisites, then validates,
+orders, and schedules the graph deterministically. Without a cloud key, it can
+use a local Ollama model; if no model is available, it still returns a structural
+route.
 
 Optional environment variables for the backend:
 
@@ -71,6 +77,9 @@ export OLLAMA_BASE_URL=http://127.0.0.1:11434
 
 `OPENAI_API_KEY` is accepted as an alternative to `LLM_API_KEY`.
 
+Text, YouTube, and PDF ingestion are preserved as legacy API endpoints for a
+future product iteration; they are not exposed in the current interface.
+
 ## Checks
 
 ```bash
@@ -82,6 +91,17 @@ npm run check:e2e
 cd backend
 uv run pytest
 ```
+
+## Promo video
+
+```bash
+npm run video
+npm run video:render
+```
+
+The Remotion composition is cut to `public/music.mp3` and includes a ~49-second
+demo slot in the middle. To replace it, copy your recording to `public/demo.mp4`
+and set `demoSrc` to `"demo.mp4"` in `video/Root.tsx`.
 
 ## Project shape
 

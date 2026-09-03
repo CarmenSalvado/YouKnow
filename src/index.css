@@ -588,7 +588,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
   min-height: 0;
   overflow: hidden;
 }
-.top-controls > .control:first-child { width: 130px; }
 .topic-control { width: min(290px, 26vw); }
 .control:not(.topic-control) { width: 174px; }
 .control-field {
@@ -1272,7 +1271,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
   .top-controls { flex-wrap: wrap; height: auto; padding-block: 14px; }
   .top-controls > div { margin-left: 0; flex-wrap: wrap; }
   .topic-control { width: 100%; }
-  .top-controls > .control:first-child { width: 180px; }
   .dashboard-grid {
     grid-template: "map" clamp(440px, 70vw, 680px) "study" auto "calendar" clamp(140px, 20vw, 166px) / 1fr;
     overflow: visible;
@@ -1305,7 +1303,6 @@ button:focus-visible { outline: 2px solid #6ea7ff; outline-offset: 3px; }
     grid-template-columns: 1fr 1fr;
     width: 100%;
   }
-  .top-controls > .control:first-child { width: 100%; }
   .control:not(.topic-control) { width: 100%; }
   .control.ai-credentials { width: 100%; }
   .generate-button { grid-column: 1 / -1; justify-content: center; }

@@ -52,7 +52,7 @@ const suggestedModels: Record<AIProvider, readonly string[]> = {
   gemini: ['gemini-3.7-flash'],
   openrouter: ['openrouter/free'],
 }
-type Preferences = { sourceType: SourceType; topic: string; minutes: number; targetDate: string }
+type Preferences = { topic: string; minutes: number; targetDate: string }
 type LessonState = 'ready' | 'active' | 'completed' | 'reviewing'
 type Notice = { kind: 'success' | 'error'; text: string }
 type PlanConcept = { id: string; name: string; description: string; estimated_minutes: number; category: 'foundation' | 'core' | 'advanced' | 'application'; level: number }
@@ -95,7 +95,6 @@ const accountKey = (key: string, account: AccountId) => `${key}:${account}`
 const sessionKey = (session: StudySession) => `${session.date}:${session.concept_id}`
 
 const defaultPreferences = (account: AccountId, profiles = defaultProfiles): Preferences => ({
-  sourceType: 'topic',
   topic: profiles.find(profile => profile.id === account)?.starterTopic ?? '',
   minutes: 30,
   targetDate: '',
@@ -247,27 +246,22 @@ function Control({ label, children, wide }: { label: string; children: React.Rea
   return <label className={`control block ${wide ? 'topic-control' : ''}`}><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">{label}</span>{children}</label>
 }
 
-function TopControls({ preferences, sourceFile, provider, model, apiKey, onChange, onFileChange, onProviderChange, onModelChange, onApiKeyChange, onGenerate, generating }: {
+function TopControls({ preferences, provider, model, apiKey, onChange, onProviderChange, onModelChange, onApiKeyChange, onGenerate, generating }: {
   preferences: Preferences
-  sourceFile: File | null
   provider: AIProvider
   model: string
   apiKey: string
   onChange: (preferences: Preferences) => void
-  onFileChange: (file: File | null) => void
   onProviderChange: (provider: AIProvider) => void
   onModelChange: (model: string) => void
   onApiKeyChange: (apiKey: string) => void
   onGenerate: () => void
   generating: boolean
 }) {
-  const labels = { topic: 'What do you want to learn?', text: 'Paste text or notes', youtube: 'YouTube URL', pdf: 'PDF document' }
-  const placeholders = { topic: 'e.g. Urban beekeeping', text: 'Paste the source material here', youtube: 'https://youtube.com/watch?v=…', pdf: '' }
-  const hasSource = preferences.sourceType === 'pdf' ? !!sourceFile : !!preferences.topic.trim()
+  const hasTitle = !!preferences.topic.trim()
   return (
-    <form className="top-controls flex h-[78px] items-center gap-4" onSubmit={event => { event.preventDefault(); if (hasSource && !generating) onGenerate() }}>
-      <Control label="Learn from"><select aria-label="Learning source" className="control-field" value={preferences.sourceType} onChange={event => { onFileChange(null); onChange({ ...preferences, sourceType: event.target.value as SourceType, topic: '' }) }}><option value="topic">A topic</option><option value="text">Pasted text</option><option value="youtube">YouTube</option><option value="pdf">A PDF</option></select></Control>
-      <Control label={labels[preferences.sourceType]} wide>{preferences.sourceType === 'pdf' ? <input key={preferences.sourceType} aria-label="PDF source" className="control-field file-field" type="file" accept="application/pdf,.pdf" onChange={event => onFileChange(event.target.files?.[0] ?? null)} /> : <input aria-label="Learning source content" className="control-field" value={preferences.topic} placeholder={placeholders[preferences.sourceType]} onChange={event => onChange({ ...preferences, topic: event.target.value })} />}</Control>
+    <form className="top-controls flex h-[78px] items-center gap-4" onSubmit={event => { event.preventDefault(); if (hasTitle && !generating) onGenerate() }}>
+      <Control label="What do you want to learn?" wide><input aria-label="Learning title" className="control-field" value={preferences.topic} placeholder="e.g. Urban beekeeping" maxLength={200} onChange={event => onChange({ ...preferences, topic: event.target.value })} /></Control>
       <div className="control ai-credentials"><span className="mb-1.5 block text-[10px] font-medium uppercase tracking-[.1em] text-[#8793a5]">AI provider / model / API key{apiKey && <i>ready</i>}</span><div><select aria-label="AI provider" value={provider} onChange={event => onProviderChange(event.target.value as AIProvider)}><option value="openai">OpenAI</option><option value="qwen">Qwen</option><option value="groq">Groq</option><option value="gemini">Gemini</option><option value="openrouter">OpenRouter</option></select><input aria-label="AI model" value={model} list="ai-models" spellCheck={false} title="Model ID sent to the selected provider." onChange={event => onModelChange(event.target.value)} /><datalist id="ai-models">{suggestedModels[provider].map(candidate => <option key={candidate} value={candidate} />)}</datalist><input aria-label="AI API key" type="password" value={apiKey} autoComplete="off" spellCheck={false} placeholder="API key · not saved" title="Used only for this tab and sent to your backend." onChange={event => onApiKeyChange(event.target.value)} /></div></div>
       <div className="ml-auto flex items-end gap-3">
         <Control label="Time per day">
@@ -276,7 +270,7 @@ function TopControls({ preferences, sourceFile, provider, model, apiKey, onChang
           </select>
         </Control>
         <Control label="Deadline (optional)"><input className="control-field" type="date" min={new Date().toISOString().slice(0, 10)} value={preferences.targetDate} onChange={event => onChange({ ...preferences, targetDate: event.target.value })} /></Control>
-        <button type="submit" disabled={generating || !hasSource} className="generate-button flex h-10 items-center gap-2 rounded-[7px] bg-[#1759dc] px-5 text-[12px] font-semibold text-white hover:bg-[#1d68f5]">
+        <button type="submit" disabled={generating || !hasTitle} className="generate-button flex h-10 items-center gap-2 rounded-[7px] bg-[#1759dc] px-5 text-[12px] font-semibold text-white hover:bg-[#1d68f5]">
           <WandSparkles size={16} className={generating ? 'spin' : ''} /> {generating ? 'Generating…' : 'Generate Plan'}
         </button>
       </div>
@@ -567,7 +561,6 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
   const [account, setAccount] = useState<AccountId>(defaultProfiles[0].id)
   const [activeNav, setActiveNav] = useState('Learning Map')
   const [preferences, setPreferences] = useState<Preferences>(() => readStored(accountKey(preferencesKey, account), defaultPreferences(account, profiles)))
-  const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [provider, setProvider] = useState<AIProvider>('openai')
   const [model, setModel] = useState(defaultModel.openai)
   const [apiKey, setApiKey] = useState('')
@@ -613,7 +606,6 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
     setPlan(readStored(accountKey(planKey, next), null))
     setCompletedSessions(readStored(accountKey(completedKey, next), []))
     setKnownConceptIds(readStored(accountKey(knownKey, next), []))
-    setSourceFile(null)
     setActiveSession(null)
     setFocusedConceptId(undefined)
     setPresetLessonState('ready')
@@ -637,7 +629,6 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
     setKnownConceptIds([])
     setNotes({})
     setSources([])
-    setSourceFile(null)
     setActiveSession(null)
     setFocusedConceptId(undefined)
     setPresetLessonState('ready')
@@ -727,22 +718,14 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
     setNotice({ kind: 'success', text: next.includes(conceptId) ? 'Marked as already known. Your planned hours are unchanged.' : 'Removed from already known.' })
   }
 
-  const requestPlan = async (sourceType: SourceType, value: string, file: File | null) => {
+  const requestPlan = async (title: string) => {
     const studyPreferences = { minutes_per_day: preferences.minutes, target_date: preferences.targetDate || undefined }
     const headers: Record<string, string> = apiKey.trim() ? { 'X-LLM-API-Key': apiKey.trim(), 'X-LLM-Provider': provider, 'X-LLM-Model': model.trim() } : {}
-    let request: Promise<Response>
-    if (sourceType === 'pdf') {
-        const form = new FormData()
-        form.append('file', file!)
-        form.append('preferences', JSON.stringify(studyPreferences))
-        request = fetch('/api/plans/generate-file', { method: 'POST', headers, body: form })
-    } else {
-      request = fetch('/api/plans/generate', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: { type: sourceType, value }, preferences: studyPreferences }),
-      })
-    }
+    const request = fetch('/api/plans/generate', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, preferences: studyPreferences }),
+    })
     const [response] = await Promise.all([request, new Promise(resolve => window.setTimeout(resolve, 2800))])
     const body = await response.json().catch(() => ({})) as Plan & { detail?: string }
     if (!response.ok) throw new Error(body.detail ?? 'Plan generation failed. Is the API running?')
@@ -754,7 +737,7 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
     setExpandingTopic(null)
     setNotice(null)
     try {
-      const body = await requestPlan(preferences.sourceType, preferences.topic, sourceFile)
+      const body = await requestPlan(preferences.topic)
       setPlan(body)
       localStorage.setItem(accountKey(planKey, account), JSON.stringify(body))
       setCompletedSessions([])
@@ -763,9 +746,6 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
       localStorage.removeItem(accountKey(knownKey, account))
       setActiveSession(null)
       setFocusedConceptId(body.schedule[0]?.concept_id)
-      const sourceLabel = preferences.sourceType === 'pdf' ? sourceFile?.name : preferences.topic
-      const sourceConceptId = body.goal_concept_id ?? body.concepts[0]?.id
-      if (sourceLabel?.trim() && sourceConceptId) addSource(sourceConceptId, sourceLabel.trim().slice(0, 180), preferences.sourceType)
       setNotice({ kind: 'success', text: body.generation_mode === 'structural' ? `Draft route ready with ${body.statistics.concept_count} stations. Add an API key or start Ollama for subject-specific analysis.` : `Custom route ready with ${body.statistics.concept_count} necessary stations.` })
       setActiveNav('Learning Map')
     } catch (error) {
@@ -818,7 +798,7 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
     setNotice(null)
     try {
       if (!plan) {
-        const branch = await requestPlan('topic', conceptName, null)
+        const branch = await requestPlan(conceptName)
         setPlan(branch)
         localStorage.setItem(accountKey(planKey, account), JSON.stringify(branch))
         setCompletedSessions([])
@@ -903,8 +883,8 @@ function Dashboard({ theme, background, onThemeChange, onBackgroundChange }: { t
       <PixelAtmosphere />
       <Sidebar active={activeNav} account={account} profiles={profiles} onAccountChange={switchAccount} onCreateProfile={createProfile} onDeleteProfile={deleteProfile} onNavigate={setActiveNav} />
       <main className="main-column min-w-0 px-5 pb-5">
-        <TopControls preferences={preferences} sourceFile={sourceFile} provider={provider} model={model} apiKey={apiKey} onChange={changePreferences} onFileChange={setSourceFile} onProviderChange={changeProvider} onModelChange={setModel} onApiKeyChange={setApiKey} onGenerate={generatePlan} generating={generating} />
-        {activeNav === 'Learning Map' ? <div className="dashboard-grid min-h-0"><LearningMap title={(plan?.title ?? preferences.topic) || 'Your learning route'} concepts={plan?.concepts ?? (starterRoute ? undefined : [])} edges={plan?.edges} lines={plan?.lines} nodeLabelStyle={nodeLabelStyle} empty={!plan && !starterRoute} currentConceptId={focusedConceptId ?? currentConcept?.id} todayConceptId={currentSession?.concept_id ?? currentConcept?.id} goalConceptId={plan?.goal_concept_id ?? plan?.schedule?.[plan.schedule.length - 1]?.concept_id ?? (starterRoute ? stations[stations.length - 1]?.label : undefined)} knownConceptIds={knownConceptIds} completedConceptIds={completedConceptIds} canGenerate={preferences.sourceType === 'pdf' ? !!sourceFile : !!preferences.topic.trim()} generating={generating} onGenerate={generatePlan} onStartConcept={startConcept} onExpandConcept={expandConcept} onOpenNotebook={openNotebook} onToggleKnown={toggleKnown} onRequestRequiredPath={requestRequiredPath} /><StudyOverview preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} lessonState={lessonState} progress={progress} empty={!plan && !starterRoute} onLessonAction={handleLesson} /><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div> : <WorkspaceView active={activeNav} theme={theme} background={background} nodeLabelStyle={nodeLabelStyle} preferences={preferences} plan={plan} starterRoute={starterRoute} currentConcept={currentConcept} currentSession={currentSession} completedSessions={completedSessions} lessonState={lessonState} progress={progress} notes={notes} sources={sources} notebookConceptId={notebookConceptId} onLessonAction={handleLesson} onOpenConcept={openConcept} onNavigate={setActiveNav} onThemeChange={onThemeChange} onBackgroundChange={onBackgroundChange} onNodeLabelStyleChange={changeNodeLabelStyle} onNotice={setNotice} onSelectNotebookConcept={setNotebookConceptId} onSaveNote={saveNote} onAddSource={addSource} onRemoveSource={removeSource} />}
+        <TopControls preferences={preferences} provider={provider} model={model} apiKey={apiKey} onChange={changePreferences} onProviderChange={changeProvider} onModelChange={setModel} onApiKeyChange={setApiKey} onGenerate={generatePlan} generating={generating} />
+        {activeNav === 'Learning Map' ? <div className="dashboard-grid min-h-0"><LearningMap title={(plan?.title ?? preferences.topic) || 'Your learning route'} concepts={plan?.concepts ?? (starterRoute ? undefined : [])} edges={plan?.edges} lines={plan?.lines} nodeLabelStyle={nodeLabelStyle} empty={!plan && !starterRoute} currentConceptId={focusedConceptId ?? currentConcept?.id} todayConceptId={currentSession?.concept_id ?? currentConcept?.id} goalConceptId={plan?.goal_concept_id ?? plan?.schedule?.[plan.schedule.length - 1]?.concept_id ?? (starterRoute ? stations[stations.length - 1]?.label : undefined)} knownConceptIds={knownConceptIds} completedConceptIds={completedConceptIds} canGenerate={!!preferences.topic.trim()} generating={generating} onGenerate={generatePlan} onStartConcept={startConcept} onExpandConcept={expandConcept} onOpenNotebook={openNotebook} onToggleKnown={toggleKnown} onRequestRequiredPath={requestRequiredPath} /><StudyOverview preferences={preferences} plan={plan} currentConcept={currentConcept} currentSession={currentSession} lessonState={lessonState} progress={progress} empty={!plan && !starterRoute} onLessonAction={handleLesson} /><WeeklyCalendar schedule={plan?.schedule} completedSessions={completedSessions} /></div> : <WorkspaceView active={activeNav} theme={theme} background={background} nodeLabelStyle={nodeLabelStyle} preferences={preferences} plan={plan} starterRoute={starterRoute} currentConcept={currentConcept} currentSession={currentSession} completedSessions={completedSessions} lessonState={lessonState} progress={progress} notes={notes} sources={sources} notebookConceptId={notebookConceptId} onLessonAction={handleLesson} onOpenConcept={openConcept} onNavigate={setActiveNav} onThemeChange={onThemeChange} onBackgroundChange={onBackgroundChange} onNodeLabelStyleChange={changeNodeLabelStyle} onNotice={setNotice} onSelectNotebookConcept={setNotebookConceptId} onSaveNote={saveNote} onAddSource={addSource} onRemoveSource={removeSource} />}
       </main>
       {generating && <RouteGeneration topic={expandingTopic ?? preferences.topic} expanding={!!expandingTopic} />}
       {notice && <div className={`dashboard-notice ${notice.kind}`} role="status"><span>{notice.text}</span><button type="button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></button></div>}
